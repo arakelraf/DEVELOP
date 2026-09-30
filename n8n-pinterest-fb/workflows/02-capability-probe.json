@@ -1,0 +1,51 @@
+{
+  "name": "02 - Capability Probe",
+  "nodes": [
+    {
+      "id": "wh",
+      "name": "Probe Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "capability-probe",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "cd",
+      "name": "Check Capabilities",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\n// Capability probe. Answers two questions for Workflow A:\n//   1. is $helpers.httpRequest available inside a Code node?\n//   2. does the /originals/ image upgrade actually resolve for a real pin?\nconst out = {\n  helpers_available: typeof $helpers !== 'undefined' && !!($helpers && $helpers.httpRequest),\n  node_version: typeof process !== 'undefined' ? process.version : 'n/a',\n};\nif (!out.helpers_available) { out.note = 'Fall back to HTTP Request nodes for image verification.'; return [{ json: out }]; }\n\nconst base = 'https://i.pinimg.com';\nconst p = '/ef/dc/0f/efdc0f00cd8e58ed53e28e44583b7269';\nconst candidates = [\n  base + '/originals' + p + '.jpg',\n  base + '/originals' + p + '.png',\n  base + '/1200x' + p + '.jpg',\n  base + '/736x' + p + '.jpg',\n  base + '/236x' + p + '.jpg',\n];\n\nout.results = [];\nfor (const url of candidates) {\n  try {\n    const res = await $helpers.httpRequest({\n      method: 'HEAD', url, returnFullResponse: true, timeout: 15000,\n      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },\n    });\n    const h = res.headers || {};\n    out.results.push({ url, status: res.statusCode, bytes: Number(h['content-length'] || 0) || null, type: h['content-type'] || null });\n    if (res.statusCode === 200 && !out.chosen) { out.chosen = url; out.chosen_bytes = Number(h['content-length'] || 0) || null; }\n  } catch (e) {\n    out.results.push({ url, error: String(e.message || e).slice(0, 160) });\n  }\n}\nout.verdict = out.chosen ? 'image upgrade works; HEAD verification usable in a Code node'\n                         : 'no candidate returned 200 - check headers or fall back';\nreturn [{ json: out }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Probe Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Capabilities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade"
+  }
+}

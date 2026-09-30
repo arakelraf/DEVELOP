@@ -223,10 +223,39 @@ results.unshift({ json: {
 return results;
 `;
 
+/**
+ * Workflow A's Code nodes. Each entry names its dependency modules, which are
+ * inlined above the node body so the Code node needs no module system.
+ */
+const NODE_MANIFEST = [
+  { out: 'build/config-map.js', src: 'src/nodes/config-map.js', deps: [] },
+  { out: 'build/boards-to-sync.js', src: 'src/nodes/boards-to-sync.js', deps: [] },
+  { out: 'build/parse-pins-to-rows.js', src: 'src/nodes/parse-pins-to-rows.js',
+    deps: ['parser'] },
+  { out: 'build/pins-to-resolve.js', src: 'src/nodes/pins-to-resolve.js', deps: [] },
+  { out: 'build/resolve-pin-result.js', src: 'src/nodes/resolve-pin-result.js',
+    deps: ['parser', 'resolver'] },
+  { out: 'build/group-by-listing.js', src: 'src/nodes/group-by-listing.js', deps: [] },
+  { out: 'build/merge-item.js', src: 'src/nodes/merge-item.js', deps: [] },
+  { out: 'build/pick-image.js', src: 'src/nodes/pick-image.js', deps: [] },
+  { out: 'build/sync-summary.js', src: 'src/nodes/sync-summary.js', deps: [] },
+];
+
+const DEP_SOURCE = { parser: PARSER, resolver: RESOLVER };
+
+const manifestTargets = {};
+for (const entry of NODE_MANIFEST) {
+  const body = fs.readFileSync(path.join(ROOT, entry.src), 'utf8');
+  const head = entry.deps.map((d) => DEP_SOURCE[d]).join('\n\n');
+  manifestTargets[entry.out] = head ? `${head}\n\n${body}` : body;
+}
+
 const targets = {
+  ...manifestTargets,
+
   'build/parse-pins.js': PARSE_PINS,
   'build/build-feed-url.js': BUILD_FEED_URL,
-  'build/pins-to-resolve.js': PINS_TO_RESOLVE,
+  'build/probe-pins-to-resolve.js': PINS_TO_RESOLVE,
   'build/extract-destination.js': EXTRACT_DESTINATION,
 };
 

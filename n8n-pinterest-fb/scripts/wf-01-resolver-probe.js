@@ -69,7 +69,7 @@ const nodes = [
     type: 'n8n-nodes-base.code',
     typeVersion: 2,
     position: [500, -40],
-    parameters: { jsCode: read('build/pins-to-resolve.js') },
+    parameters: { jsCode: read('build/probe-pins-to-resolve.js') },
     notes: 'Expands the posted pin_urls into one item each. Batch capped at 10.',
   },
   {

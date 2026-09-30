@@ -1,0 +1,74 @@
+/**
+ * Emits workflows/02-url-check.json  -  "02 - URL Check".
+ *
+ * A keepable diagnostic: POST {"url":"...","method":"HEAD"} and get back the
+ * status, content-type and content-length as the n8n server sees them. Useful
+ * whenever an image or a feed behaves differently from n8n than from a
+ * browser (hotlink protection, rate limits, geo blocks).
+ */
+const fs = require('fs');
+const path = require('path');
+
+const nodes = [
+  { id: 'wh', name: 'Probe Webhook', type: 'n8n-nodes-base.webhook', typeVersion: 2.1,
+    position: [260, 0],
+    parameters: { httpMethod: 'POST', path: 'url-check', responseMode: 'lastNode', options: {} } },
+  { id: 'prep', name: 'Read Request', type: 'n8n-nodes-base.code', typeVersion: 2,
+    position: [480, 0], parameters: { jsCode:
+      '// Accepts {"url":"..."} or {"urls":[...]} plus an optional method.\n'
+      + '// Mode: Run Once for All Items.\n\n'
+      + 'const b = ($input.first().json || {}).body || $input.first().json || {};\n'
+      + 'let urls = b.urls ?? b.url;\n'
+      + "if (typeof urls === 'string') urls = [urls];\n"
+      + 'if (!Array.isArray(urls) || !urls.length) {\n'
+      + '  throw new Error(\'POST {"url":"https://...","method":"HEAD"}\');\n'
+      + '}\n'
+      + "const method = String(b.method || 'HEAD').toUpperCase();\n"
+      + 'return urls.slice(0, 10).map((u) => ({ json: { url: String(u), method } }));\n' } },
+  { id: 'req', name: 'Check URL', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
+    position: [700, 0],
+    parameters: {
+      method: '={{ $json.method }}',
+      url: '={{ $json.url }}',
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'User-Agent', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+          + ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
+        { name: 'Accept', value: 'image/avif,image/webp,image/*,*/*;q=0.8' },
+        { name: 'Referer', value: 'https://www.pinterest.com/' },
+      ] },
+      options: { timeout: 15000,
+        response: { response: { fullResponse: true, neverError: true, responseFormat: 'text' } } },
+    },
+    onError: 'continueRegularOutput', alwaysOutputData: true },
+  { id: 'out', name: 'Report', type: 'n8n-nodes-base.code', typeVersion: 2,
+    position: [920, 0], parameters: { jsCode:
+      '// Mode: Run Once for All Items.\n'
+      + "const asked = $('Read Request').all().map((i) => i.json);\n"
+      + 'return $input.all().map((it, i) => {\n'
+      + '  const j = it.json || {};\n'
+      + '  const h = j.headers || {};\n'
+      + '  return { json: {\n'
+      + "    url: asked[i]?.url || '',\n"
+      + "    method: asked[i]?.method || '',\n"
+      + '    status: j.statusCode ?? null,\n'
+      + "    content_type: h['content-type'] || null,\n"
+      + "    content_length: Number(h['content-length'] || 0) || null,\n"
+      + '  } };\n'
+      + '});\n' } },
+];
+
+const wf = {
+  name: '02 - URL Check',
+  nodes,
+  connections: {
+    'Probe Webhook': { main: [[{ node: 'Read Request', type: 'main', index: 0 }]] },
+    'Read Request': { main: [[{ node: 'Check URL', type: 'main', index: 0 }]] },
+    'Check URL': { main: [[{ node: 'Report', type: 'main', index: 0 }]] },
+  },
+  settings: { executionOrder: 'v1', timezone: 'Europe/Belgrade',
+              saveDataSuccessExecution: 'all', saveManualExecutions: true },
+};
+fs.writeFileSync(path.join(__dirname, '../workflows/02-url-check.json'),
+  JSON.stringify(wf, null, 2) + '\n');
+console.log('wrote workflows/02-url-check.json');
