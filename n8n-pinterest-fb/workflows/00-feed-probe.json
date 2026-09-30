@@ -1,0 +1,256 @@
+{
+  "name": "00 - Feed Probe (Pinterest -> Etsy)",
+  "nodes": [
+    {
+      "id": "sticky-overview",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -200
+      ],
+      "parameters": {
+        "width": 460,
+        "height": 300,
+        "content": "## 00 - Feed Probe (read-only)\n\n**Run this first.** It proves the Pinterest -> Etsy extraction works\nagainst your real boards before anything is stored or posted.\n\nClick **Execute workflow**, open the form link n8n shows you, and type:\n- your Pinterest username (or paste your profile URL)\n- one board (slug, display name, or paste the board URL)\n\nIt **writes nothing to any table**. Safe to re-run whenever a board\nlooks wrong.\n\n_The Code nodes are generated from `src/` by\n`scripts/build-code-nodes.js` - edit there, not here._"
+      }
+    },
+    {
+      "id": "form-ask-board",
+      "name": "Ask For Board",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        260,
+        -40
+      ],
+      "parameters": {
+        "formTitle": "Test a Pinterest board feed",
+        "formDescription": "Read-only check. Nothing is saved and nothing is posted. You can paste a full board URL into the second field and leave the first one empty.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Pinterest username",
+              "fieldType": "text",
+              "placeholder": "smartlydigit  (or paste your profile URL)",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Board (slug, name, or pasted board URL)",
+              "fieldType": "text",
+              "placeholder": "printable-wall-art",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "code-build-url",
+      "name": "Build Feed URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Board input normalization: turn whatever the user types into a username,\n * a board slug and an RSS URL.\n *\n * Used by the feed probe and by Workflow D's \"add board\" form, so a board\n * added through the UI and a board tested by hand always produce the same\n * rss_url. Part of the Pinterest source layer.\n *\n * The forms accept sloppy input on purpose - a pasted board URL, a profile\n * URL, an @handle, a display name - because the user fills them in by hand.\n */\n\nconst PINTEREST_HOST_RE = /^https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\//i;\n\n/** \"@SmartlyDigit\", \"pinterest.com/smartlydigit/\", \"SmartlyDigit\" -> \"smartlydigit\" */\nfunction normalizeUsername(input) {\n  let s = String(input || '').trim();\n  if (!s) return '';\n  if (PINTEREST_HOST_RE.test(s)) {\n    const m = s.replace(PINTEREST_HOST_RE, '').split(/[/?#]/).filter(Boolean);\n    s = m[0] || '';\n  }\n  s = s.replace(/^@/, '').trim().toLowerCase();\n  // Pinterest usernames: letters, digits, underscore; no spaces.\n  s = s.replace(/[^a-z0-9_]/g, '');\n  return s;\n}\n\n/** \"Printable Wall Art!\" -> \"printable-wall-art\"; already-slug passes through. */\nfunction slugify(input) {\n  return String(input || '')\n    .trim()\n    .toLowerCase()\n    .replace(/&/g, ' and ')\n    .replace(/['’]/g, '')\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '')\n    .slice(0, 80);\n}\n\n/**\n * Pull username and/or slug out of a pasted Pinterest URL.\n * Returns {} when the string is not a Pinterest URL.\n */\nfunction fromPinterestUrl(input) {\n  const s = String(input || '').trim();\n  if (!PINTEREST_HOST_RE.test(s)) return {};\n  const parts = s.replace(PINTEREST_HOST_RE, '').split(/[?#]/)[0]\n    .split('/').filter(Boolean);\n  if (!parts.length) return {};\n  const out = { username: normalizeUsername(parts[0]) };\n  if (parts[1]) {\n    // Tolerate a pasted \".../board.rss\" too.\n    out.board_slug = slugify(parts[1].replace(/\\.rss$/i, ''));\n  }\n  // /pin/12345/ is a pin, not a board - do not mistake it for a slug.\n  if (out.board_slug === 'pin' || /^\\d+$/.test(out.board_slug || '')) {\n    delete out.board_slug;\n  }\n  return out;\n}\n\n/**\n * Resolve the two form fields into a board definition.\n *\n * Either field may carry a full URL; a URL in the board field wins, because\n * that is what a user pasting a board link expects.\n *\n * @returns {{ok:true, username, board_slug, rss_url}|{ok:false, error}}\n */\nfunction resolveBoard(usernameInput, boardInput) {\n  const fromBoard = fromPinterestUrl(boardInput);\n  const fromUser = fromPinterestUrl(usernameInput);\n\n  const username = fromBoard.username\n    || fromUser.username\n    || normalizeUsername(usernameInput);\n\n  const board_slug = fromBoard.board_slug\n    || (fromBoard.username ? '' : slugify(boardInput))\n    || fromUser.board_slug\n    || '';\n\n  if (!username) {\n    return { ok: false, error:\n      'Could not read a Pinterest username. Enter it as it appears in your '\n      + 'profile URL (pinterest.com/USERNAME), or paste the profile URL.' };\n  }\n  if (!board_slug) {\n    return { ok: false, error:\n      'Could not read a board slug. Enter the last part of the board URL '\n      + '(pinterest.com/username/BOARD-SLUG), or paste the board URL.' };\n  }\n  return { ok: true, username, board_slug, rss_url: buildRssUrl(username, board_slug) };\n}\n\nfunction buildRssUrl(username, board_slug) {\n  return `https://www.pinterest.com/${username}/${board_slug}.rss`;\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Generated by scripts/build-code-nodes.js from src/board-url.js - do not\n// edit here. Mode: Run Once for All Items.\n\nconst f = $input.first().json;\n\n// Form field labels become the item keys, so these must match the labels on\n// the Form Trigger exactly.\nconst usernameInput = f['Pinterest username'] ?? f.username ?? '';\nconst boardInput = f['Board (slug, name, or pasted board URL)'] ?? f.board ?? '';\n\nconst r = resolveBoard(usernameInput, boardInput);\n\nif (!r.ok) {\n  // Surface the problem as data rather than throwing, so the form's ending\n  // screen can explain it in plain language.\n  return [{ json: { ok: false, stage: 'bad_input', message: r.error,\n                    typed_username: String(usernameInput),\n                    typed_board: String(boardInput) } }];\n}\n\nreturn [{ json: {\n  ok: true,\n  username: r.username,\n  board_slug: r.board_slug,\n  rss_url: r.rss_url,\n} }];\n"
+      },
+      "notes": "Normalizes the typed input into https://www.pinterest.com/{user}/{board}.rss"
+    },
+    {
+      "id": "if-input-ok",
+      "name": "Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        740,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c-ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "rss-read",
+      "name": "Read Board RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        980,
+        -140
+      ],
+      "parameters": {
+        "url": "={{ $json.rss_url }}",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true,
+      "notes": "Continues on error so a renamed/secret board is reported, not fatal."
+    },
+    {
+      "id": "code-parse-pins",
+      "name": "Parse Pins",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Pinterest pin -> Etsy listing extraction.\n *\n * This is the ONLY place that knows Pinterest exists. It is kept as a plain\n * module so it can be unit-tested outside n8n; the same body is pasted into\n * Workflow A's \"Parse Pins\" Code node.\n *\n * Contract (the isolation boundary the rest of the system depends on):\n *   input : a raw RSS item object from the RSS Feed Read node\n *   output: { ok: true, etsy_listing_id, etsy_url, title, description,\n *             image_url, image_candidates, pin_url }\n *        or { ok: false, reason, pin_url }\n *\n * Workflows B/C/D never see a field from this file other than the ones above,\n * and key off etsy_listing_id. Swapping in the Etsy API later means replacing\n * this file and nothing else.\n */\n\n// ---------------------------------------------------------------- HTML text\n\nconst ENTITIES = {\n  amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n  hellip: '…', mdash: '—', ndash: '–', rsquo: '’',\n  lsquo: '‘', ldquo: '“', rdquo: '”', middot: '·',\n  eacute: 'é', trade: '™', reg: '®', copy: '©',\n};\n\nfunction decodeEntities(s) {\n  return String(s || '')\n    .replace(/&#x([0-9a-f]+);/gi, (_, h) => safeCodePoint(parseInt(h, 16)))\n    .replace(/&#(\\d+);/g, (_, d) => safeCodePoint(parseInt(d, 10)))\n    .replace(/&([a-z]+);/gi, (m, name) => {\n      const k = name.toLowerCase();\n      return Object.prototype.hasOwnProperty.call(ENTITIES, k) ? ENTITIES[k] : m;\n    });\n}\n\nfunction safeCodePoint(n) {\n  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';\n  try { return String.fromCodePoint(n); } catch { return ''; }\n}\n\n// Pinterest boilerplate that adds nothing to a Facebook caption.\nconst BOILERPLATE = [\n  /\\b(?:this|these)\\s+pins?\\s+(?:was|were)\\s+discovered\\s+by[^.]*\\.?/i,\n  /\\bdiscover\\s+\\(and\\s+save!?\\)\\s+your\\s+own\\s+pins\\s+on\\s+pinterest\\.?/i,\n  /\\bfind\\s+this\\s+pin\\s+and\\s+more\\s+on\\s+[^.|]*\\s+by\\s+[^.|]*\\.?/i,\n  /\\bsaved?\\s+(from|to)\\s+pinterest\\.?/i,\n  /\\bmore\\s+ideas\\s+about\\s+[^.]*\\./i,\n  /\\bclick\\s+(the\\s+)?link\\s+(in\\s+bio|to\\s+(shop|buy|view))\\b[^.]*\\.?/i,\n  /\\bvisit\\s+(my|our)\\s+(etsy\\s+)?shop\\s+for\\s+more\\b[^.]*\\.?/i,\n];\n\n/** Strip tags, decode entities, drop boilerplate, collapse whitespace. */\nfunction cleanText(html) {\n  let s = String(html == null ? '' : html);\n  s = s.replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n       .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ');\n  // Keep paragraph/line structure before tags are removed.\n  s = s.replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/p>/gi, '\\n\\n');\n  s = s.replace(/<[^>]*>/g, ' ');\n  s = decodeEntities(s);\n  // A bare Pinterest/Etsy URL left in the body is noise; the link is appended\n  // deliberately at the end of the caption by Workflow B.\n  s = s.replace(/https?:\\/\\/(www\\.)?(pinterest\\.[a-z.]+|pin\\.it|etsy\\.com)\\/\\S*/gi, ' ');\n  for (const re of BOILERPLATE) s = s.replace(re, ' ');\n  s = s.replace(/[ \\t ]+/g, ' ')\n       .replace(/ ?\\n ?/g, '\\n')\n       .replace(/\\n{3,}/g, '\\n\\n')\n       .trim();\n  return s;\n}\n\n// ---------------------------------------------------------------- Etsy link\n\n/**\n * Etsy listing URLs we accept:\n *   https://www.etsy.com/listing/1234567890/slug?utm_source=...\n *   https://etsy.com/listing/1234567890\n *   https://www.etsy.com/il-en/listing/1234567890/slug   (locale prefix)\n *   https://www.etsy.com/shop/X/listing/1234567890/slug\n * Rejected: anything without a /listing/{digits} segment.\n */\nconst ETSY_LISTING_RE = /https?:\\/\\/(?:[a-z0-9-]+\\.)?etsy\\.com\\/(?:[a-z]{2}-[a-z]{2}\\/)?(?:[^\\s\"'<>?#]*\\/)?listing\\/(\\d{6,15})(?:[\\/?#][^\\s\"'<>]*)?/i;\n\n/** Pinterest wraps outbound links in a redirector; unwrap before matching. */\nfunction unwrapRedirect(url) {\n  const s = String(url || '');\n  const m = s.match(/[?&](?:url|u|redirect|target|dest)=([^&]+)/i);\n  if (!m) return s;\n  try {\n    const inner = decodeURIComponent(m[1]);\n    if (/^https?:\\/\\//i.test(inner)) return inner;\n  } catch { /* malformed escape - fall through */ }\n  return s;\n}\n\n/** Collect every plausible URL from an RSS item, in order of trustworthiness. */\nfunction linkCandidates(item) {\n  const out = [];\n  const push = (v) => { if (v && typeof v === 'string') out.push(v); };\n\n  push(item.link);\n  push(item.guid && (item.guid._ || item.guid.value || item.guid));\n  push(item.id);\n  // Some feeds put the outbound URL in an enclosure or a namespaced field.\n  if (item.enclosure && item.enclosure.url) push(item.enclosure.url);\n  push(item['pinterest:link']);\n\n  const html = [\n    item.description,\n    item.content,\n    item['content:encoded'],\n    item.contentSnippet,\n    item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Every href/src in the HTML, plus any bare URL in the text.\n  for (const m of html.matchAll(/(?:href|src)\\s*=\\s*[\"']([^\"']+)[\"']/gi)) push(m[1]);\n  for (const m of html.matchAll(/https?:\\/\\/[^\\s\"'<>)]+/gi)) push(m[0]);\n\n  return out.map(unwrapRedirect);\n}\n\n/** First Etsy listing link found, normalized. null when the pin has none. */\nfunction extractEtsy(item) {\n  for (const cand of linkCandidates(item)) {\n    const m = String(cand).match(ETSY_LISTING_RE);\n    if (m) {\n      const id = m[1];\n      return { etsy_listing_id: id, etsy_url: `https://www.etsy.com/listing/${id}` };\n    }\n  }\n  return null;\n}\n\n// ------------------------------------------------------------------- images\n\n/**\n * Pinterest serves the same image at several sizes under a size segment:\n *   https://i.pinimg.com/236x/ab/cd/ef/abcdef123.jpg\n *   https://i.pinimg.com/originals/ab/cd/ef/abcdef123.jpg\n * /originals/ is the largest but does not always exist (and can carry a\n * different extension), so return an ordered candidate list. Workflow A\n * HEAD-checks them and stores the first that actually loads.\n */\nconst PINIMG_SIZE_RE = /^(https?:\\/\\/i\\.pinimg\\.com\\/)([^/]+)(\\/.+)$/i;\nconst SIZE_PREFERENCE = ['originals', '1200x', '736x', '564x', '474x', '236x'];\n\nfunction imageCandidates(url) {\n  const s = String(url || '').trim();\n  if (!s) return [];\n  const m = s.match(PINIMG_SIZE_RE);\n  if (!m) return [s];\n  const [, host, currentSize, path] = m;\n  const out = [];\n  for (const size of SIZE_PREFERENCE) {\n    out.push(`${host}${size}${path}`);\n    // /originals/ frequently stores a .png or .webp where the thumb was .jpg.\n    if (size === 'originals') {\n      const swapped = path.replace(/\\.(jpe?g)$/i, '.png');\n      if (swapped !== path) out.push(`${host}${size}${swapped}`);\n    }\n  }\n  if (!SIZE_PREFERENCE.includes(currentSize.toLowerCase())) out.push(s);\n  // De-duplicate, preserve order, and always keep the original as last resort.\n  const seen = new Set();\n  const uniq = out.filter((u) => !seen.has(u) && seen.add(u));\n  if (!uniq.includes(s)) uniq.push(s);\n  return uniq;\n}\n\n/** Pull the pin image out of an RSS item. */\nfunction extractImage(item) {\n  const html = [\n    item.description, item.content, item['content:encoded'], item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Prefer a real media field when the feed provides one.\n  const media = item['media:content'] || item['media:thumbnail'];\n  const mediaUrl = media && (media.url || (media.$ && media.$.url));\n  if (mediaUrl) return String(mediaUrl);\n  if (item.enclosure && item.enclosure.url && /^image\\//i.test(item.enclosure.type || 'image/')) {\n    return String(item.enclosure.url);\n  }\n\n  const img = html.match(/<img[^>]+src\\s*=\\s*[\"']([^\"']+)[\"']/i);\n  if (img) return img[1];\n  const bare = html.match(/https?:\\/\\/i\\.pinimg\\.com\\/[^\\s\"'<>)]+\\.(?:jpe?g|png|webp)/i);\n  return bare ? bare[0] : '';\n}\n\n/** The pin's own Pinterest URL, for the pin_urls audit trail. */\nfunction extractPinUrl(item) {\n  const cands = [\n    item.guid && (item.guid._ || item.guid.value || item.guid),\n    item.link,\n    item.id,\n  ].filter((v) => typeof v === 'string');\n  for (const c of cands) {\n    const m = c.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n    if (m) return m[0];\n  }\n  const html = [item.description, item.content, item['content:encoded']]\n    .filter(Boolean).join(' ');\n  const m = html.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n  return m ? m[0] : '';\n}\n\n// ------------------------------------------------------------------- public\n\nfunction parsePin(item, opts = {}) {\n  const pin_url = extractPinUrl(item);\n  const etsy = extractEtsy(item);\n  if (!etsy) {\n    return { ok: false, reason: 'no_etsy_link', pin_url,\n             title: cleanText(item.title).slice(0, 120) };\n  }\n  const rawImage = extractImage(item);\n  const cands = imageCandidates(rawImage);\n  const title = cleanText(item.title);\n  const description = cleanText(\n    item.description || item.content || item['content:encoded'] || item.summary || ''\n  );\n  if (!cands.length) {\n    return { ok: false, reason: 'no_image', pin_url, title,\n             etsy_listing_id: etsy.etsy_listing_id };\n  }\n  return {\n    ok: true,\n    etsy_listing_id: etsy.etsy_listing_id,\n    etsy_url: etsy.etsy_url,\n    title,\n    description,\n    image_url: cands[0],          // provisional; HEAD-verified downstream\n    image_candidates: cands,\n    pin_url,\n    board_slug: opts.board_slug || '',\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Generated by scripts/build-code-nodes.js from src/pin-parser.js - do not\n// edit here. Mode: Run Once for All Items.\n\nconst board_slug = $('Build Feed URL').first().json.board_slug;\nconst rss_url = $('Build Feed URL').first().json.rss_url;\n\nconst parsed = [];\nconst rejected = [];\n\nfor (const item of $input.all()) {\n  const raw = item.json;\n\n  // The RSS node was set to continue on error so one dead board cannot stop\n  // the run. A failed fetch arrives as an item carrying .error instead of\n  // feed fields.\n  if (raw && raw.error) {\n    return [{\n      json: {\n        ok: false,\n        stage: 'feed_error',\n        board_slug,\n        rss_url,\n        message: String(raw.error.message || raw.error),\n        hint: 'A 404 usually means the board was renamed or is secret. A '\n            + 'timeout or 403 means Pinterest rate-limited or blocked the '\n            + 'n8n server for this request.',\n      },\n    }];\n  }\n\n  const r = parsePin(raw, { board_slug });\n  if (r.ok) parsed.push(r); else rejected.push(r);\n}\n\nif (!parsed.length && !rejected.length) {\n  return [{\n    json: {\n      ok: false,\n      stage: 'empty_feed',\n      board_slug,\n      rss_url,\n      message: 'The feed was fetched but contained no items.',\n      hint: 'Check the board slug. A private/secret board returns an empty '\n          + 'or 404 feed even when the URL looks right.',\n    },\n  }];\n}\n\nconst out = parsed.map((p) => ({ json: p }));\n\n// A single summary item makes the result readable at a glance in the\n// execution view and feeds the form's completion screen.\nout.unshift({\n  json: {\n    _summary: true,\n    ok: true,\n    board_slug,\n    rss_url,\n    pins_in_feed: parsed.length + rejected.length,\n    with_etsy_link: parsed.length,\n    rejected: rejected.length,\n    rejected_reasons: rejected.reduce((a, r) => {\n      a[r.reason] = (a[r.reason] || 0) + 1;\n      return a;\n    }, {}),\n    rejected_examples: rejected.slice(0, 5).map((r) => ({\n      reason: r.reason, title: r.title, pin_url: r.pin_url,\n    })),\n    unique_listings: new Set(parsed.map((p) => p.etsy_listing_id)).size,\n    first_pin_preview: parsed.length ? {\n      etsy_listing_id: parsed[0].etsy_listing_id,\n      etsy_url: parsed[0].etsy_url,\n      title: parsed[0].title,\n      description: parsed[0].description,\n      image_url: parsed[0].image_url,\n      image_candidates: parsed[0].image_candidates,\n      pin_url: parsed[0].pin_url,\n    } : null,\n  },\n});\n\nreturn out;\n"
+      },
+      "notes": "The only Pinterest-aware logic. Outputs a summary item then one item per pin."
+    },
+    {
+      "id": "form-result",
+      "name": "Show Result",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1460,
+        -140
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "={{ $json.ok === false ? \"Could not read that board\" : \"Feed parsed OK\" }}",
+        "completionMessage": "={{ $json.ok === false ? ($json.message + \"\\n\\n\" + ($json.hint || \"\")) : (\"Board: \" + $json.board_slug + \"\\nFeed: \" + $json.rss_url + \"\\n\\nPins in feed: \" + $json.pins_in_feed + \"\\nWith an Etsy link: \" + $json.with_etsy_link + \"\\nUnique listings: \" + $json.unique_listings + \"\\nIgnored: \" + $json.rejected + \"\\n\\nFirst pin:\\n\" + JSON.stringify($json.first_pin_preview, null, 2) + \"\\n\\nOpen the execution in n8n to see every parsed pin.\") }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "form-bad-input",
+      "name": "Explain Bad Input",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        980,
+        80
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Check what you typed",
+        "completionMessage": "={{ $json.message }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "sticky-isolation",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        80
+      ],
+      "parameters": {
+        "width": 420,
+        "height": 220,
+        "color": 4,
+        "content": "### Source isolation boundary\n\n`Parse Pins` is the **only** node in the whole system that knows\nPinterest exists. It emits a fixed contract:\n\n`etsy_listing_id, etsy_url, title, description, image_url,\nimage_candidates, pin_url`\n\nWorkflows B/C/D key on **etsy_listing_id** only. Replacing this with\nthe Etsy API later means replacing this node and nothing else."
+      }
+    }
+  ],
+  "connections": {
+    "Ask For Board": {
+      "main": [
+        [
+          {
+            "node": "Build Feed URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Feed URL": {
+      "main": [
+        [
+          {
+            "node": "Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "Read Board RSS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain Bad Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Board RSS": {
+      "main": [
+        [
+          {
+            "node": "Parse Pins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pins": {
+      "main": [
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true
+  }
+}
