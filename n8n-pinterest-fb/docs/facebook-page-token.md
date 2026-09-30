@@ -130,3 +130,122 @@ row `FB_PAGE_ID`.
   want the app reviewed, the token keeps working regardless.
 - **`expires_at` is not 0.** You derived the Page token from the wrong user
   token. Step 4, then step 5 — in that order, same browser session.
+
+---
+
+# If developers.facebook.com is blocked in your country
+
+The error "Meta for Developers is not available in this location" blocks the
+**developer portal only**. Three different hosts are involved, and they are
+not blocked together:
+
+| Host | What it is for | Needed when |
+|---|---|---|
+| `developers.facebook.com` | create an app, Graph API Explorer | once, to create an app |
+| `www.facebook.com` | the normal site, **and the OAuth login dialog** | once, to approve access |
+| `graph.facebook.com` | the API n8n actually calls | continuously |
+
+Verified from this project's n8n host: `graph.facebook.com` answers normally.
+So **publishing is not affected** - only the one-time act of creating an app.
+
+There are two ways around it. Both end with the same Page token.
+
+## Option A - tunnel through your own server
+
+Your n8n host is in the US, where the portal is available. An SSH tunnel
+through it is your own infrastructure, not a third-party VPN.
+
+```bash
+# on your machine; keeps running while you use the browser
+ssh -D 1080 -N -C user@your-n8n-host
+```
+
+Then point a browser at it:
+
+- **Firefox**: Settings -> search "proxy" -> Network Settings -> Settings ->
+  Manual proxy configuration -> SOCKS Host `127.0.0.1`, Port `1080`,
+  **SOCKS v5**, and tick **Proxy DNS when using SOCKS v5**.
+- **Chrome**: needs a launch flag or an extension; Firefox is less trouble.
+
+Check it worked by opening <https://ifconfig.me> - it should show the
+server's address, not yours. Then follow steps 1-7 above as normal.
+
+Turn the proxy off afterwards. The tunnel is needed **only** while creating
+the app and minting the token; n8n never needs it.
+
+## Option B - no portal at all, using someone else's App ID
+
+This is the "just log me in" route. You never open the developer portal; you
+log in on `www.facebook.com` like normal and approve access.
+
+You need two things from somebody who already has a Meta app (any developer
+friend, or your own app created once via Option A):
+
+1. the **App ID**
+2. that they add `https://www.facebook.com/connect/login_success.html` to the
+   app's **Valid OAuth Redirect URIs** (App settings -> Facebook Login ->
+   Settings). One click for them, and it exposes nothing of theirs.
+
+They must NOT send you the App Secret over chat. You only need it for step 3
+below; ask them to run that one command themselves and send you the result,
+or to add your Facebook account to their app as an Administrator so you can
+read the secret yourself.
+
+### Step 1 - log in and approve (this is the login dialog you wanted)
+
+Open this URL in your normal browser, substituting the App ID:
+
+```
+https://www.facebook.com/v21.0/dialog/oauth
+  ?client_id=APP_ID
+  &redirect_uri=https://www.facebook.com/connect/login_success.html
+  &response_type=token
+  &scope=pages_manage_posts,pages_read_engagement,pages_show_list
+```
+
+(put it on one line, without the spaces)
+
+Facebook shows its own login and permission screen. Approve it. You land on a
+blank "Success" page, and the token is in the **address bar**:
+
+```
+https://www.facebook.com/connect/login_success.html#access_token=EAA...&expires_in=5183944
+```
+
+Copy the value between `access_token=` and the next `&`. This is a
+**short-lived user token**.
+
+### Step 2 - check the permissions really came through
+
+```bash
+curl -s -G "https://graph.facebook.com/v21.0/me/permissions" \
+  --data-urlencode "access_token=SHORT_LIVED_USER_TOKEN"
+```
+
+`pages_manage_posts` and `pages_read_engagement` must both show as `granted`.
+
+### Step 3 - make it long-lived, then get the Page token
+
+Same as steps 4-6 at the top of this file: `fb_exchange_token`, then
+`/me/accounts`, then verify with `debug_token` that `expires_at` is `0`.
+
+All three calls are against `graph.facebook.com`, which is not blocked - so
+they work from your machine or from the n8n host, whichever answers.
+
+## What is NOT an option
+
+Giving n8n your Facebook **password** so it can log in like a browser.
+
+- It breaks Facebook's terms, and the penalty is losing the account - and with
+  it the Page this whole system posts to.
+- A login from a datacenter IP with an unfamiliar device fingerprint looks
+  exactly like an account takeover, so it triggers a checkpoint immediately,
+  and 2FA stops the automation dead.
+- A password grants **everything**; a Page token grants "post to this Page"
+  and is revocable in one click.
+- n8n has no such credential anyway: its `facebookGraphApi` credential type
+  accepts a single `accessToken` field and nothing else.
+
+The token flow above is the supported version of the same idea: you log in
+once, on Facebook's own site, and what n8n keeps afterwards is a narrow,
+revocable key rather than your password.
