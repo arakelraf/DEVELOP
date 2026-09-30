@@ -451,6 +451,8 @@ const workflow = {
   settings: {
     executionOrder: 'v1',
     timezone: 'Europe/Belgrade',
+    // Crashes go to "E - Error Handler", which writes them to errors_log.
+    errorWorkflow: 'PvlehC1HppyNUe9b',
     // Pin pages are ~1MB each; do not persist them on scheduled runs.
     // During a test run we keep everything so the output can be inspected.
     saveDataSuccessExecution: TEST_TRIGGER ? 'all' : 'none',

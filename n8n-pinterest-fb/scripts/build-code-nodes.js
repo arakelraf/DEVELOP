@@ -255,6 +255,7 @@ const NODE_MANIFEST = [
     deps: ['boardurl', 'control'] },
   { out: 'build/toggle-result.js', src: 'src/nodes/toggle-result.js', deps: [] },
   { out: 'build/write-result.js', src: 'src/nodes/write-result.js', deps: [] },
+  { out: 'build/format-error.js', src: 'src/nodes/format-error.js', deps: [] },
 ];
 
 const SCHEDULER = inlineModule('src/scheduler.js');

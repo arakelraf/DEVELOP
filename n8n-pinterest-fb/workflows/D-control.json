@@ -980,6 +980,7 @@
   "settings": {
     "executionOrder": "v1",
     "timezone": "Europe/Belgrade",
+    "errorWorkflow": "PvlehC1HppyNUe9b",
     "saveDataSuccessExecution": "all",
     "saveDataErrorExecution": "all",
     "saveManualExecutions": true

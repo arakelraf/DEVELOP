@@ -215,7 +215,10 @@ const workflow = {
   name: 'B - Build Schedule',
   nodes,
   connections,
-  settings: { executionOrder: 'v1', timezone: 'Europe/Belgrade',
+  settings: {
+    executionOrder: 'v1', timezone: 'Europe/Belgrade',
+    // Crashes go to "E - Error Handler", which writes them to errors_log.
+    errorWorkflow: 'PvlehC1HppyNUe9b',
     saveDataSuccessExecution: 'all', saveDataErrorExecution: 'all',
     saveManualExecutions: true },
 };
