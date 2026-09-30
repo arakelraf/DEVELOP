@@ -9,6 +9,15 @@
 // Mode: Run Once for All Items.
 
 const cfg = $('Config').first().json;
+const mode = cfg._auth_mode; // 'oauth' | 'token'
+
+// The remedy differs per mode, so hints name the thing the user actually has.
+const reconnect = mode === 'oauth'
+  ? 'Open Credentials -> "Facebook OAuth (login)", fill in App ID and App '
+    + 'Secret, then click "Connect my account" and approve the Facebook window.'
+  : 'Open Credentials -> "Facebook User Token" and paste a valid long-lived '
+    + 'USER token (Graph API Explorer gives you one; see '
+    + 'docs/facebook-page-token.md).';
 const res = $input.first().json || {};
 const body = res.body && typeof res.body === 'object' ? res.body : res;
 const httpStatus = res.statusCode ?? null;
@@ -30,10 +39,8 @@ if (httpStatus == null && !hasGraphError) {
     stage: 'request_not_sent',
     error: 'The call to /me/accounts never reached Facebook'
       + (detail ? `: ${detail}` : '.'),
-    hint: 'This is what an unconnected login looks like. Open Credentials -> '
-        + '"Facebook OAuth (login)" in n8n, fill in App ID and App Secret, '
-        + 'then click "Connect my account" and approve the Facebook window. '
-        + 'Re-run afterwards.',
+    hint: `AUTH_MODE is "${mode}", and its credential is not usable yet. `
+        + reconnect + ' Re-run afterwards.',
     http_status: null,
   } }];
 }
@@ -48,10 +55,13 @@ if (hasGraphError) {
     error: `${parts}: ${e.message || 'no message returned'}`
       + (e.error_user_msg ? ` - ${e.error_user_msg}` : ''),
     hint: e.code === 190
-      ? 'The login has expired or been revoked. Open the "Facebook OAuth '
-        + '(login)" credential and click "Connect my account" again.'
-      : 'Check that the login granted pages_show_list, pages_manage_posts and '
-        + 'pages_read_engagement.',
+      ? 'The token has expired or been revoked. ' + reconnect
+      : 'Check that pages_show_list, pages_manage_posts and '
+        + 'pages_read_engagement were all granted. '
+        + (mode === 'token'
+          ? 'Note: this must be a USER token, not a Page token - /me/accounts '
+            + 'is what turns one into the other.'
+          : ''),
     http_status: httpStatus,
   } }];
 }
@@ -115,5 +125,6 @@ return [{ json: {
   // Used as a request header by the publish nodes. Never written to a table.
   page_token: String(page.access_token),
   page_id_source: wanted ? 'config' : 'only_page_on_account',
+  auth_mode: mode,
   pages_available: pages.length,
 } }];

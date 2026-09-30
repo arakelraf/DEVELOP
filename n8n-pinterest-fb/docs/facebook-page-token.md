@@ -249,3 +249,50 @@ Giving n8n your Facebook **password** so it can log in like a browser.
 The token flow above is the supported version of the same idea: you log in
 once, on Facebook's own site, and what n8n keeps afterwards is a narrow,
 revocable key rather than your password.
+
+---
+
+# "I have no such setting" - the redirect URI
+
+`Valid OAuth Redirect URIs` does not exist until the **Facebook Login product
+is added to the app**. Before that there is no Facebook Login section in the
+menu at all, so the setting is genuinely absent rather than hidden.
+
+Where to add it depends on which dashboard the app got:
+
+- **Older dashboard**: left menu -> **Add product** -> *Facebook Login* ->
+  **Set up**. *Facebook Login -> Settings* appears afterwards, with the
+  redirect URIs field.
+- **Newer dashboard**: App Dashboard -> **Use cases** -> "Authenticate and
+  request data from users with Facebook Login" -> **Customize**. Permissions
+  are listed there, and that use case has its own **Settings** holding the
+  redirect URIs.
+
+The value to add for this project:
+
+```
+https://n8ntestsrb.duckdns.org/rest/oauth2-credential/callback
+```
+
+n8n prints the same URL inside the credential dialog - copy it from there,
+since it is authoritative for your instance.
+
+## Or skip the redirect URI entirely
+
+A redirect URI is needed **only** for the OAuth login. The Graph API Explorer
+hands you a token directly, with no redirect URI and no Facebook Login
+product. So the project supports both, chosen by `AUTH_MODE` in the `config`
+table:
+
+| `AUTH_MODE` | What you do | Needs a redirect URI |
+|---|---|---|
+| `oauth` | open *Facebook OAuth (login)*, paste App ID + Secret, click **Connect my account**, approve the Facebook window | yes |
+| `token` | paste a long-lived **user** token into *Facebook User Token* | no |
+
+Both end in the same place: the run calls `/me/accounts` itself to turn the
+user token into a **Page** token. So in either mode you never copy a Page
+token, and `FB_PAGE_ID` is optional when the account manages a single Page.
+
+**It must be a USER token, not a Page token.** `/me/accounts` is the call that
+converts one into the other, and it does not accept a Page token. Steps 3 and
+4 at the top of this file produce the right thing.

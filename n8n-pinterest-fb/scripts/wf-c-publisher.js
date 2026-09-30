@@ -30,6 +30,14 @@ const T = {
 // It is used for exactly one call - /me/accounts - which derives the PAGE
 // token that the publish calls then carry as a header.
 const FB_OAUTH = { id: 'gew3mnOJy0FEybxs', name: 'Facebook OAuth (login)' };
+// The alternative to the login: a long-lived USER token pasted by hand, for
+// when the Meta app has no redirect URI configured. Both routes end up
+// calling /me/accounts, so the rest of the workflow is identical.
+const FB_USER_TOKEN = { id: 'k62FLo1U37qyXxOk', name: 'Facebook User Token' };
+
+const ME_ACCOUNTS_URL =
+  "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION"
+  + " + '/me/accounts' }}";
 
 const table = (id) => ({ __rl: true, mode: 'id', value: id });
 const cols = (value) => ({ mappingMode: 'defineBelow', value, matchingColumns: [], schema: [] });
@@ -113,11 +121,18 @@ const nodes = [
       'whose slot already arrived is published immediately, so nothing is',
       'lost to downtime.',
       '',
-      '**Login once, then it just runs.** Open the credential *Facebook OAuth',
-      '(login)*, paste the App ID and Secret, and click **Connect my account**',
-      '- Facebook\'s own login window opens. Nothing else to copy: each run',
-      'derives the Page token from that login via `/me/accounts`, so',
-      '`FB_PAGE_ID` is optional too.',
+      '**Two ways to authenticate**, set by `AUTH_MODE` in config:',
+      '',
+      '`oauth` - open the *Facebook OAuth (login)* credential, paste App ID and',
+      'Secret, click **Connect my account**; Facebook\'s own login window',
+      'opens. Needs a redirect URI whitelisted in the Meta app.',
+      '',
+      '`token` - paste a long-lived **user** token into *Facebook User Token*.',
+      'No redirect URI needed; the Graph API Explorer issues one directly.',
+      '',
+      'Either way the run derives the **Page** token itself via',
+      '`/me/accounts`, so nothing is copied twice and `FB_PAGE_ID` is',
+      'optional when the account manages one Page.',
       '',
       '**DRY_RUN is ON by default.** Everything runs except the Facebook calls,',
       'and the exact request bodies land in `errors_log`. Set `DRY_RUN=false`',
@@ -164,11 +179,19 @@ const nodes = [
     notes: 'TRUE = really posting, so a Page token is needed. A dry run skips '
          + 'the Facebook calls entirely and needs no credential.' },
 
-  { id: 'http-pages', name: 'FB List Pages', type: 'n8n-nodes-base.httpRequest',
-    typeVersion: 4.2, position: [840, -320],
+  { id: 'if-authmode', name: 'OAuth Mode?', type: 'n8n-nodes-base.if',
+    typeVersion: 2.2, position: [840, -320],
+    parameters: ifString("={{ $('Config').first().json._auth_mode }}", 'oauth'),
+    notes: 'AUTH_MODE in config. oauth = the login credential; token = a '
+         + 'pasted long-lived user token. Both end at Pick Page.' },
+
+  // Two ways in, one way out: whichever credential is available calls
+  // /me/accounts, and Pick Page turns the user token into a Page token.
+  { id: 'http-pages', name: 'FB List Pages (OAuth)',
+    type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [1060, -440],
     parameters: {
       method: 'GET',
-      url: "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+      url: ME_ACCOUNTS_URL,
       ...fbOAuth,
       sendQuery: true,
       queryParameters: { parameters: [
@@ -178,18 +201,36 @@ const nodes = [
     },
     credentials: { oAuth2Api: FB_OAUTH },
     onError: 'continueRegularOutput', alwaysOutputData: true,
-    notes: 'The only call that uses the OAuth login. Turns the user token into '
-         + 'a Page token.' },
+    notes: 'Uses the Facebook login. Needs a redirect URI whitelisted in the '
+         + 'Meta app.' },
+
+  { id: 'http-pages-tok', name: 'FB List Pages (Token)',
+    type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [1060, -260],
+    parameters: {
+      method: 'GET',
+      url: ME_ACCOUNTS_URL,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendQuery: true,
+      queryParameters: { parameters: [
+        { name: 'fields', value: 'id,name,access_token' },
+      ] },
+      options: fbResponse,
+    },
+    credentials: { httpHeaderAuth: FB_USER_TOKEN },
+    onError: 'continueRegularOutput', alwaysOutputData: true,
+    notes: 'Uses a pasted long-lived USER token. No redirect URI needed - the '
+         + 'Graph API Explorer issues one directly.' },
 
   { id: 'cd-pickpage', name: 'Pick Page', type: 'n8n-nodes-base.code', typeVersion: 2,
-    position: [1060, -320], parameters: { jsCode: read('build/pick-page.js') },
+    position: [1300, -350], parameters: { jsCode: read('build/pick-page.js') },
     notes: 'Chooses the Page (by FB_PAGE_ID, or the only one on the account) '
          + 'and keeps its token in memory for this execution only.' },
 
   { id: 'if-pageok', name: 'Page Resolved?', type: 'n8n-nodes-base.if',
-    typeVersion: 2.2, position: [1280, -320], parameters: ifTrue('={{ $json.ok }}') },
+    typeVersion: 2.2, position: [1520, -350], parameters: ifTrue('={{ $json.ok }}') },
 
-  logRow('dt-authlog', 'Log Auth Problem', 1500, -460, '=auth_problem', 'error',
+  logRow('dt-authlog', 'Log Auth Problem', 1740, -500, '=auth_problem', 'error',
     'Login or Page resolution failed. The message says which, and what to do.'),
 
   dtGet('dt-boards', 'Load Boards', 640, -140, T.boards),
@@ -402,8 +443,10 @@ const connections = {
   'Load Config': { main: [[m('Config')]] },
   // Live runs resolve a Page token first; a dry run goes straight on.
   Config: { main: [[m('Live Mode?')]] },
-  'Live Mode?': { main: [[m('FB List Pages')], [m('Load Boards')]] },
-  'FB List Pages': { main: [[m('Pick Page')]] },
+  'Live Mode?': { main: [[m('OAuth Mode?')], [m('Load Boards')]] },
+  'OAuth Mode?': { main: [[m('FB List Pages (OAuth)')], [m('FB List Pages (Token)')]] },
+  'FB List Pages (OAuth)': { main: [[m('Pick Page')]] },
+  'FB List Pages (Token)': { main: [[m('Pick Page')]] },
   'Pick Page': { main: [[m('Page Resolved?')]] },
   'Page Resolved?': { main: [[m('Load Boards')], [m('Log Auth Problem')]] },
   'Load Boards': { main: [[m('Boards Loaded')]] },
