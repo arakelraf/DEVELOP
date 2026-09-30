@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "n8n-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {
+        "MCP_MODE": "stdio",
+        "N8N_API_URL": "https://n8ntestsrb.duckdns.org",
+        "N8N_API_KEY": "${N8N_API_KEY}"
+      }
+    }
+  }
+}
