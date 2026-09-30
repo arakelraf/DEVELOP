@@ -239,9 +239,16 @@ const NODE_MANIFEST = [
   { out: 'build/merge-item.js', src: 'src/nodes/merge-item.js', deps: [] },
   { out: 'build/pick-image.js', src: 'src/nodes/pick-image.js', deps: [] },
   { out: 'build/sync-summary.js', src: 'src/nodes/sync-summary.js', deps: [] },
+  { out: 'build/plan-schedule.js', src: 'src/nodes/plan-schedule.js',
+    deps: ['scheduler', 'posttext'] },
 ];
 
-const DEP_SOURCE = { parser: PARSER, resolver: RESOLVER };
+const SCHEDULER = inlineModule('src/scheduler.js');
+const POSTTEXT = inlineModule('src/post-text.js');
+
+const DEP_SOURCE = {
+  parser: PARSER, resolver: RESOLVER, scheduler: SCHEDULER, posttext: POSTTEXT,
+};
 
 const manifestTargets = {};
 for (const entry of NODE_MANIFEST) {
