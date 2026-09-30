@@ -243,6 +243,7 @@ const NODE_MANIFEST = [
     deps: ['scheduler', 'posttext'] },
   { out: 'build/select-to-publish.js', src: 'src/nodes/select-to-publish.js',
     deps: ['publisher'] },
+  { out: 'build/pick-page.js', src: 'src/nodes/pick-page.js', deps: [] },
   { out: 'build/verify-claim.js', src: 'src/nodes/verify-claim.js', deps: [] },
   { out: 'build/media-id.js', src: 'src/nodes/media-id.js', deps: [] },
   { out: 'build/handle-publish-result.js', src: 'src/nodes/handle-publish-result.js',

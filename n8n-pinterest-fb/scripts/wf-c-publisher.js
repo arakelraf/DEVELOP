@@ -26,7 +26,10 @@ const T = {
   config: 'Fzx5awBGnmaDaffF',
   errors: 'VahesI6mpjXmcBX5',
 };
-const FB_CRED = { id: 'k62FLo1U37qyXxOk', name: 'Facebook Page Token' };
+// The OAuth credential holds the USER token granted by the login dialog.
+// It is used for exactly one call - /me/accounts - which derives the PAGE
+// token that the publish calls then carry as a header.
+const FB_OAUTH = { id: 'gew3mnOJy0FEybxs', name: 'Facebook OAuth (login)' };
 
 const table = (id) => ({ __rl: true, mode: 'id', value: id });
 const cols = (value) => ({ mappingMode: 'defineBelow', value, matchingColumns: [], schema: [] });
@@ -81,10 +84,17 @@ const logRow = (id, name, x, y, ctx, level, note) => ({
   notes: note,
 });
 
-const fbAuth = {
+const fbOAuth = {
   authentication: 'genericCredentialType',
-  genericAuthType: 'httpHeaderAuth',
+  genericAuthType: 'oAuth2Api',
 };
+
+/**
+ * The Page token resolved at run time. Publish calls send it as a plain
+ * Authorization header rather than through a credential, because it is
+ * derived during the execution and is never stored anywhere.
+ */
+const PAGE_TOKEN = "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}";
 const fbResponse = {
   timeout: 30000,
   response: { response: { fullResponse: true, neverError: true, responseFormat: 'json' } },
@@ -103,9 +113,15 @@ const nodes = [
       'whose slot already arrived is published immediately, so nothing is',
       'lost to downtime.',
       '',
+      '**Login once, then it just runs.** Open the credential *Facebook OAuth',
+      '(login)*, paste the App ID and Secret, and click **Connect my account**',
+      '- Facebook\'s own login window opens. Nothing else to copy: each run',
+      'derives the Page token from that login via `/me/accounts`, so',
+      '`FB_PAGE_ID` is optional too.',
+      '',
       '**DRY_RUN is ON by default.** Everything runs except the Facebook calls,',
       'and the exact request bodies land in `errors_log`. Set `DRY_RUN=false`',
-      'in config once the Page token is in the credential.',
+      'in config when you are ready to post.',
       '',
       'Status flow: `queued` -> `posting` (claimed) -> `scheduled` (accepted by',
       'Facebook) or `posted` (published now) / `failed` / `skipped`.',
@@ -142,6 +158,39 @@ const nodes = [
   dtGet('dt-config', 'Load Config', 200, -140, T.config),
   { id: 'cd-config', name: 'Config', type: 'n8n-nodes-base.code', typeVersion: 2,
     position: [420, -140], parameters: { jsCode: read('build/config-map.js') } },
+
+  { id: 'if-live', name: 'Live Mode?', type: 'n8n-nodes-base.if', typeVersion: 2.2,
+    position: [620, -140], parameters: ifTrue('={{ $json._dry_run === false }}'),
+    notes: 'TRUE = really posting, so a Page token is needed. A dry run skips '
+         + 'the Facebook calls entirely and needs no credential.' },
+
+  { id: 'http-pages', name: 'FB List Pages', type: 'n8n-nodes-base.httpRequest',
+    typeVersion: 4.2, position: [840, -320],
+    parameters: {
+      method: 'GET',
+      url: "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+      ...fbOAuth,
+      sendQuery: true,
+      queryParameters: { parameters: [
+        { name: 'fields', value: 'id,name,access_token' },
+      ] },
+      options: fbResponse,
+    },
+    credentials: { oAuth2Api: FB_OAUTH },
+    onError: 'continueRegularOutput', alwaysOutputData: true,
+    notes: 'The only call that uses the OAuth login. Turns the user token into '
+         + 'a Page token.' },
+
+  { id: 'cd-pickpage', name: 'Pick Page', type: 'n8n-nodes-base.code', typeVersion: 2,
+    position: [1060, -320], parameters: { jsCode: read('build/pick-page.js') },
+    notes: 'Chooses the Page (by FB_PAGE_ID, or the only one on the account) '
+         + 'and keeps its token in memory for this execution only.' },
+
+  { id: 'if-pageok', name: 'Page Resolved?', type: 'n8n-nodes-base.if',
+    typeVersion: 2.2, position: [1280, -320], parameters: ifTrue('={{ $json.ok }}') },
+
+  logRow('dt-authlog', 'Log Auth Problem', 1500, -460, '=auth_problem', 'error',
+    'Login or Page resolution failed. The message says which, and what to do.'),
 
   dtGet('dt-boards', 'Load Boards', 640, -140, T.boards),
   gate('gt-boards', 'Boards Loaded', 860, -140, 'Load Boards'),
@@ -232,7 +281,10 @@ const nodes = [
     parameters: {
       method: 'POST',
       url: '={{ $json.fb_photo_url }}',
-      ...fbAuth,
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: PAGE_TOKEN },
+      ] },
       sendBody: true,
       bodyParameters: { parameters: [
         { name: 'url', value: '={{ $json.image_url }}' },
@@ -241,7 +293,6 @@ const nodes = [
       ] },
       options: fbResponse,
     },
-    credentials: { httpHeaderAuth: FB_CRED },
     onError: 'continueRegularOutput', alwaysOutputData: true,
     notes: 'Step 1 of 2. Facebook fetches the image itself.' },
 
@@ -272,7 +323,10 @@ const nodes = [
     parameters: {
       method: 'POST',
       url: "={{ $('Verify Claim').first().json.fb_photo_url }}",
-      ...fbAuth,
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: PAGE_TOKEN },
+      ] },
       sendBody: true,
       contentType: 'multipart-form-data',
       bodyParameters: { parameters: [
@@ -281,7 +335,6 @@ const nodes = [
       ] },
       options: fbResponse,
     },
-    credentials: { httpHeaderAuth: FB_CRED },
     onError: 'continueRegularOutput', alwaysOutputData: true,
     notes: 'Uploads the downloaded bytes as a file instead of a URL.' },
 
@@ -294,7 +347,10 @@ const nodes = [
     parameters: {
       method: 'POST',
       url: '={{ $json.fb_feed_url }}',
-      ...fbAuth,
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: PAGE_TOKEN },
+      ] },
       sendBody: true,
       bodyParameters: { parameters: [
         { name: 'message', value: '={{ $json.post_text }}' },
@@ -306,7 +362,6 @@ const nodes = [
       ] },
       options: fbResponse,
     },
-    credentials: { httpHeaderAuth: FB_CRED },
     onError: 'continueRegularOutput', alwaysOutputData: true,
     notes: 'Step 2 of 2. published=false + scheduled_publish_time makes '
          + 'Facebook publish it at the slot.' },
@@ -345,7 +400,12 @@ const connections = {
   'Every 30 Minutes': { main: [[m('Load Config')]] },
   'Manual Publish': { main: [[m('Load Config')]] },
   'Load Config': { main: [[m('Config')]] },
-  Config: { main: [[m('Load Boards')]] },
+  // Live runs resolve a Page token first; a dry run goes straight on.
+  Config: { main: [[m('Live Mode?')]] },
+  'Live Mode?': { main: [[m('FB List Pages')], [m('Load Boards')]] },
+  'FB List Pages': { main: [[m('Pick Page')]] },
+  'Pick Page': { main: [[m('Page Resolved?')]] },
+  'Page Resolved?': { main: [[m('Load Boards')], [m('Log Auth Problem')]] },
   'Load Boards': { main: [[m('Boards Loaded')]] },
   'Boards Loaded': { main: [[m('Load Items')]] },
   'Load Items': { main: [[m('Items Loaded')]] },

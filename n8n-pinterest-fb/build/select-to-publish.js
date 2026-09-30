@@ -236,7 +236,18 @@ const plan = selectForPublish({
   maxPerRun: cfg._max_publish,
 });
 
-const realPageId = String(cfg.FB_PAGE_ID || '').trim();
+// In live mode the Page id comes from the OAuth login itself, so the config
+// key is optional. Pick Page does not run during a dry run.
+const oauthPageId = (() => {
+  try {
+    const p = $('Pick Page').first().json;
+    return p && p.ok ? String(p.page_id) : '';
+  } catch {
+    return '';
+  }
+})();
+
+const realPageId = String(cfg.FB_PAGE_ID || '').trim() || oauthPageId;
 const apiVersion = String(cfg.FB_API_VERSION || 'v21.0').trim();
 const out = [];
 
@@ -258,8 +269,9 @@ if (plan.toPublish.length && !pageId) {
     ...plan.report,
     publishing: 0,
     note: 'FB_PAGE_ID is empty in the config table, so nothing was published. '
-        + `${plan.toPublish.length} row(s) are ready and waiting. Fill in the `
-        + 'Page id (step 5 of docs/facebook-page-token.md) and re-run.',
+        + `${plan.toPublish.length} row(s) are ready and waiting. Either `
+        + 'connect the "Facebook OAuth (login)" credential, which supplies '
+        + 'the Page id automatically, or fill FB_PAGE_ID in the config table.',
   } });
   // Skip rows still get applied - a disabled board should not wait on a token.
   for (const s of plan.toSkip) out.push({ json: { _kind: 'skip', ...s } });
