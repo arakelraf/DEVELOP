@@ -24,7 +24,11 @@ const nodes = [
       + '  throw new Error(\'POST {"url":"https://...","method":"HEAD"}\');\n'
       + '}\n'
       + "const method = String(b.method || 'HEAD').toUpperCase();\n"
-      + 'return urls.slice(0, 10).map((u) => ({ json: { url: String(u), method } }));\n' } },
+      + '// preset=image sends image-oriented headers with a Pinterest referer\n'
+      + '// (right for i.pinimg.com, wrong for normal web pages, which some\n'
+      + '// edges answer with 400). preset=browser sends plain browser headers.\n'
+      + "const preset = String(b.preset || 'image').toLowerCase();\n"
+      + 'return urls.slice(0, 10).map((u) => ({ json: { url: String(u), method, preset } }));\n' } },
   { id: 'req', name: 'Check URL', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
     position: [700, 0],
     parameters: {
@@ -34,8 +38,12 @@ const nodes = [
       headerParameters: { parameters: [
         { name: 'User-Agent', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
           + ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
-        { name: 'Accept', value: 'image/avif,image/webp,image/*,*/*;q=0.8' },
-        { name: 'Referer', value: 'https://www.pinterest.com/' },
+        { name: 'Accept', value: "={{ $json.preset === 'browser'"
+          + " ? 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'"
+          + " : 'image/avif,image/webp,image/*,*/*;q=0.8' }}" },
+        { name: 'Accept-Language', value: 'en-US,en;q=0.9' },
+        { name: 'Referer', value: "={{ $json.preset === 'browser'"
+          + " ? '' : 'https://www.pinterest.com/' }}" },
       ] },
       options: { timeout: 15000,
         response: { response: { fullResponse: true, neverError: true, responseFormat: 'text' } } },

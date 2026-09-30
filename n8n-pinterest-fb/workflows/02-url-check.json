@@ -27,7 +27,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Accepts {\"url\":\"...\"} or {\"urls\":[...]} plus an optional method.\n// Mode: Run Once for All Items.\n\nconst b = ($input.first().json || {}).body || $input.first().json || {};\nlet urls = b.urls ?? b.url;\nif (typeof urls === 'string') urls = [urls];\nif (!Array.isArray(urls) || !urls.length) {\n  throw new Error('POST {\"url\":\"https://...\",\"method\":\"HEAD\"}');\n}\nconst method = String(b.method || 'HEAD').toUpperCase();\nreturn urls.slice(0, 10).map((u) => ({ json: { url: String(u), method } }));\n"
+        "jsCode": "// Accepts {\"url\":\"...\"} or {\"urls\":[...]} plus an optional method.\n// Mode: Run Once for All Items.\n\nconst b = ($input.first().json || {}).body || $input.first().json || {};\nlet urls = b.urls ?? b.url;\nif (typeof urls === 'string') urls = [urls];\nif (!Array.isArray(urls) || !urls.length) {\n  throw new Error('POST {\"url\":\"https://...\",\"method\":\"HEAD\"}');\n}\nconst method = String(b.method || 'HEAD').toUpperCase();\n// preset=image sends image-oriented headers with a Pinterest referer\n// (right for i.pinimg.com, wrong for normal web pages, which some\n// edges answer with 400). preset=browser sends plain browser headers.\nconst preset = String(b.preset || 'image').toLowerCase();\nreturn urls.slice(0, 10).map((u) => ({ json: { url: String(u), method, preset } }));\n"
       }
     },
     {
@@ -51,11 +51,15 @@
             },
             {
               "name": "Accept",
-              "value": "image/avif,image/webp,image/*,*/*;q=0.8"
+              "value": "={{ $json.preset === 'browser' ? 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' : 'image/avif,image/webp,image/*,*/*;q=0.8' }}"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
             },
             {
               "name": "Referer",
-              "value": "https://www.pinterest.com/"
+              "value": "={{ $json.preset === 'browser' ? '' : 'https://www.pinterest.com/' }}"
             }
           ]
         },
