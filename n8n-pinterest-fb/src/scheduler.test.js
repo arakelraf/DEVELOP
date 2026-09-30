@@ -152,6 +152,70 @@ t('nothing is ever scheduled in the past', () => {
   }
 });
 
+console.log('\nplanSchedule - UNIQUE etsy_listing_id');
+t('a repost after the cooldown UPDATES the existing row, never inserts a second', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')],
+    scheduleRows: [{ id: 7, etsy_listing_id: '1', status: 'posted',
+      posted_at: '2025-12-25T09:00:00.000Z' }] });
+  assert.strictEqual(r.toInsert.length, 0, 'must not insert a duplicate row');
+  assert.strictEqual(r.toRequeue.length, 1);
+  assert.strictEqual(r.toRequeue[0].requeue_row_id, 7);
+  assert.strictEqual(r.toRequeue[0].status, 'queued');
+  assert.strictEqual(r.report.inserted, 0);
+  assert.strictEqual(r.report.requeued, 1);
+});
+t('a listing with no row at all is inserted, not requeued', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')], scheduleRows: [] });
+  assert.strictEqual(r.toInsert.length, 1);
+  assert.strictEqual(r.toRequeue.length, 0);
+  assert.strictEqual(r.toInsert[0].requeue_row_id, null);
+});
+t('status=scheduled (handed to Facebook) blocks a second attempt', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')],
+    scheduleRows: [{ id: 3, etsy_listing_id: '1', status: 'scheduled',
+      scheduled_at: '2026-03-12T09:00:00.000Z' }] });
+  assert.strictEqual(r.toInsert.length, 0);
+  assert.strictEqual(r.toRequeue.length, 0);
+  assert.strictEqual(r.already.length, 1);
+  assert.strictEqual(r.already[0].status, 'scheduled');
+});
+t('a scheduled row still owns its slot', () => {
+  const r = S.planSchedule({ ...base, items: [item('2')],
+    scheduleRows: [{ id: 3, etsy_listing_id: '1', status: 'scheduled',
+      scheduled_at: '2026-03-10T09:00:00.000Z' }] });
+  assert.strictEqual(r.toInsert[0].scheduled_at, '2026-03-10T14:00:00.000Z');
+});
+t('a failed row is left for a human, not silently retried forever', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')],
+    scheduleRows: [{ id: 5, etsy_listing_id: '1', status: 'failed',
+      error: 'boom', scheduled_at: '2026-03-01T09:00:00.000Z' }] });
+  assert.strictEqual(r.toInsert.length, 0);
+  assert.strictEqual(r.skipped[0].reason, 'previous_attempt_failed');
+  assert.strictEqual(r.skipped[0].error, 'boom');
+  assert.strictEqual(r.skipped[0].row_id, 5);
+});
+t('a skipped row awaits action rather than being re-queued', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')],
+    scheduleRows: [{ id: 6, etsy_listing_id: '1', status: 'skipped',
+      scheduled_at: '2026-03-01T09:00:00.000Z' }] });
+  assert.strictEqual(r.toInsert.length, 0);
+  assert.strictEqual(r.skipped[0].reason, 'row_skipped_awaiting_action');
+});
+t('an unrecognised status is reported rather than ignored', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')],
+    scheduleRows: [{ id: 8, etsy_listing_id: '1', status: 'weird' }] });
+  assert.strictEqual(r.skipped[0].reason, 'unknown_status_weird');
+});
+t('duplicate rows for one listing: the newest wins', () => {
+  const r = S.planSchedule({ ...base, items: [item('1')],
+    scheduleRows: [
+      { id: 1, etsy_listing_id: '1', status: 'posted', posted_at: '2020-01-01T00:00:00Z' },
+      { id: 2, etsy_listing_id: '1', status: 'queued', scheduled_at: '2026-03-20T09:00:00Z' },
+    ] });
+  assert.strictEqual(r.already.length, 1, 'newest row is queued, so it blocks');
+  assert.strictEqual(r.toRequeue.length, 0);
+});
+
 console.log('\nplanSchedule - board rotation');
 t('two boards alternate instead of running back to back', () => {
   const items = [

@@ -241,13 +241,22 @@ const NODE_MANIFEST = [
   { out: 'build/sync-summary.js', src: 'src/nodes/sync-summary.js', deps: [] },
   { out: 'build/plan-schedule.js', src: 'src/nodes/plan-schedule.js',
     deps: ['scheduler', 'posttext'] },
+  { out: 'build/select-to-publish.js', src: 'src/nodes/select-to-publish.js',
+    deps: ['publisher'] },
+  { out: 'build/verify-claim.js', src: 'src/nodes/verify-claim.js', deps: [] },
+  { out: 'build/media-id.js', src: 'src/nodes/media-id.js', deps: [] },
+  { out: 'build/handle-publish-result.js', src: 'src/nodes/handle-publish-result.js',
+    deps: [] },
+  { out: 'build/publish-summary.js', src: 'src/nodes/publish-summary.js', deps: [] },
 ];
 
 const SCHEDULER = inlineModule('src/scheduler.js');
 const POSTTEXT = inlineModule('src/post-text.js');
+const PUBLISHER = inlineModule('src/publisher.js');
 
 const DEP_SOURCE = {
   parser: PARSER, resolver: RESOLVER, scheduler: SCHEDULER, posttext: POSTTEXT,
+  publisher: PUBLISHER,
 };
 
 const manifestTargets = {};

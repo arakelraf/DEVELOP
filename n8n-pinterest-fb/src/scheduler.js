@@ -93,6 +93,14 @@ function buildSlotInstants({ slots, timezone, nowMs, horizonDays, leadMinutes })
 
 const DAY_MS = 86_400_000;
 
+/**
+ * Statuses meaning "this row is not published yet, leave it alone".
+ * `scheduled` is set once Facebook has accepted the post with a
+ * scheduled_publish_time - the row is handed off but not live, so it must
+ * still block a second attempt at the same listing.
+ */
+const PENDING_STATUSES = new Set(['queued', 'posting', 'scheduled']);
+
 /** Parse a JSON-encoded list column, tolerating a bare string or null. */
 function parseList(v) {
   if (Array.isArray(v)) return v.map(String);
@@ -132,22 +140,24 @@ function planSchedule({
   const enabled = new Set(enabledBoards.map(String));
 
   // --- index the existing queue -------------------------------------------
-  const queuedBy = new Map();
-  const postedBy = new Map();
+  //
+  // schedule.etsy_listing_id is UNIQUE by design: a listing has at most ONE
+  // row, ever. So any existing row blocks a fresh insert, and a repost after
+  // the cooldown must UPDATE that row rather than add a second one.
+  const rowByListing = new Map();
   const takenSlots = new Set();
 
   for (const r of scheduleRows) {
     const id = String(r.etsy_listing_id || '');
     if (!id) continue;
-    const status = String(r.status || '');
-    if (status === 'queued' || status === 'posting') {
-      if (!queuedBy.has(id)) queuedBy.set(id, r);
+    // Keep the newest row if the table somehow holds more than one.
+    const prev = rowByListing.get(id);
+    if (!prev || String(r.id ?? '') > String(prev.id ?? '')) rowByListing.set(id, r);
+
+    // Anything not yet published still owns its slot.
+    if (PENDING_STATUSES.has(String(r.status || ''))) {
       const t = Date.parse(r.scheduled_at);
       if (Number.isFinite(t)) takenSlots.add(t);
-    } else if (status === 'posted') {
-      const t = Date.parse(r.posted_at || r.scheduled_at);
-      const prev = postedBy.get(id);
-      if (!prev || (Number.isFinite(t) && t > prev)) postedBy.set(id, Number.isFinite(t) ? t : 0);
     }
   }
 
@@ -168,25 +178,46 @@ function planSchedule({
         reason: 'all_boards_disabled', boards });
       continue;
     }
-    if (queuedBy.has(id)) {
-      already.push({ etsy_listing_id: id, title: it.title || '',
-        scheduled_at: queuedBy.get(id).scheduled_at });
-      continue;
-    }
-    if (postedBy.has(id)) {
-      const postedAt = postedBy.get(id);
-      if (repostAfterDays <= 0) {
-        skipped.push({ etsy_listing_id: id, title: it.title || '',
-          reason: 'already_posted_reposting_disabled',
-          posted_at: new Date(postedAt).toISOString() });
+    const row = rowByListing.get(id);
+    let requeueRowId = null;
+
+    if (row) {
+      const status = String(row.status || '');
+
+      if (PENDING_STATUSES.has(status)) {
+        already.push({ etsy_listing_id: id, title: it.title || '',
+          status, scheduled_at: row.scheduled_at });
         continue;
       }
-      const ageDays = (nowMs - postedAt) / DAY_MS;
-      if (ageDays < repostAfterDays) {
+
+      if (status === 'posted') {
+        const t = Date.parse(row.posted_at || row.scheduled_at);
+        const postedAt = Number.isFinite(t) ? t : 0;
+        if (repostAfterDays <= 0) {
+          skipped.push({ etsy_listing_id: id, title: it.title || '',
+            reason: 'already_posted_reposting_disabled',
+            posted_at: postedAt ? new Date(postedAt).toISOString() : null });
+          continue;
+        }
+        const ageDays = (nowMs - postedAt) / DAY_MS;
+        if (ageDays < repostAfterDays) {
+          skipped.push({ etsy_listing_id: id, title: it.title || '',
+            reason: 'posted_recently',
+            posted_at: postedAt ? new Date(postedAt).toISOString() : null,
+            days_until_eligible: Math.ceil(repostAfterDays - ageDays) });
+          continue;
+        }
+        // Cooldown served: reuse the row so the UNIQUE key still holds.
+        requeueRowId = row.id ?? null;
+      } else {
+        // failed / skipped rows are deliberately left for a human. Re-queueing
+        // a failure automatically would just fail again every run; Workflow D
+        // offers reschedule, which resets the row to queued.
         skipped.push({ etsy_listing_id: id, title: it.title || '',
-          reason: 'posted_recently',
-          posted_at: new Date(postedAt).toISOString(),
-          days_until_eligible: Math.ceil(repostAfterDays - ageDays) });
+          reason: status === 'failed' ? 'previous_attempt_failed'
+            : status === 'skipped' ? 'row_skipped_awaiting_action'
+            : `unknown_status_${status || 'empty'}`,
+          error: row.error || '', row_id: row.id ?? null });
         continue;
       }
     }
@@ -198,7 +229,7 @@ function planSchedule({
       .sort((a, b) => (priorityByBoard[b] || 0) - (priorityByBoard[a] || 0)
         || a.localeCompare(b))[0];
 
-    eligible.push({ ...it, etsy_listing_id: id, board_slug });
+    eligible.push({ ...it, etsy_listing_id: id, board_slug, requeueRowId });
   }
 
   // --- rotate boards ------------------------------------------------------
@@ -254,18 +285,27 @@ function planSchedule({
       scheduled_at: new Date(slot).toISOString(),
       status: 'queued',
       created_at: nowIso,
+      // Non-null means "update this row" instead of inserting a new one,
+      // which is what keeps etsy_listing_id unique across reposts.
+      requeue_row_id: rotated[i].requeueRowId ?? null,
       _item: rotated[i],
     });
   }
 
+  const inserts = toInsert.filter((r) => r.requeue_row_id == null);
+  const requeues = toInsert.filter((r) => r.requeue_row_id != null);
+
   return {
-    toInsert,
+    toInsert: inserts,
+    toRequeue: requeues,
     already,
     skipped,
     unplaced,
     report: {
       candidates: items.length,
       added: toInsert.length,
+      inserted: inserts.length,
+      requeued: requeues.length,
       already_scheduled: already.length,
       skipped: skipped.length,
       unplaced: unplaced.length,
@@ -278,4 +318,5 @@ function planSchedule({
 
 module.exports = {
   planSchedule, buildSlotInstants, zonedTimeToUtc, zonedYmd, tzOffsetMs, parseList,
+  PENDING_STATUSES,
 };

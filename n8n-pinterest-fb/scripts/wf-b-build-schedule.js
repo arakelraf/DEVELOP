@@ -19,7 +19,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const T = {
   boards: 'eHP9QfDm4Ay8F0HE',
   items: 'JaT1fvUeN6R77Pg2',
-  schedule: '9JZQM92fIxAMQE3Q',
+  schedule: 'xKKcCos8oPqCFNDW',
   config: 'Fzx5awBGnmaDaffF',
   errors: 'VahesI6mpjXmcBX5',
 };
@@ -123,8 +123,16 @@ const nodes = [
     notes: 'All the queueing rules. Unit-tested in src/scheduler.test.js and '
          + 'src/post-text.test.js (52 cases).' },
 
-  { id: 'if-kind', name: 'Queue Or Report?', type: 'n8n-nodes-base.if', typeVersion: 2.2,
-    position: [1960, -120], parameters: ifString('={{ $json._kind }}', 'queue') },
+  { id: 'if-kind', name: 'New Queue Row?', type: 'n8n-nodes-base.if', typeVersion: 2.2,
+    position: [1960, -120], parameters: ifString('={{ $json._kind }}', 'queue'),
+    notes: 'TRUE = a listing with no schedule row yet -> insert.' },
+
+  { id: 'if-kind2', name: 'Repost Or Report?', type: 'n8n-nodes-base.if',
+    typeVersion: 2.2, position: [1960, 120],
+    parameters: ifString('={{ $json._kind }}', 'requeue'),
+    notes: 'TRUE = a listing past its repost cooldown -> UPDATE its existing '
+         + 'row. schedule.etsy_listing_id is unique, so a repost must reuse '
+         + 'the row rather than add a second one.' },
 
   { id: 'dt-insert', name: 'Insert Queue Row', type: 'n8n-nodes-base.dataTable',
     typeVersion: 1.1, position: [2180, -220],
@@ -137,13 +145,35 @@ const nodes = [
         fb_post_id: '={{ $json.fb_post_id }}',
         post_text: '={{ $json.post_text }}',
         error: '={{ $json.error }}',
+        attempts: 0,
         created_at: '={{ $json.created_at }}',
         posted_at: '={{ $json.posted_at }}',
       }), options: {} },
     notes: 'No alwaysOutputData: zero planned posts must mean zero rows.' },
 
+  { id: 'dt-update', name: 'Update Queue Row', type: 'n8n-nodes-base.dataTable',
+    typeVersion: 1.1, position: [2180, 20],
+    parameters: { resource: 'row', operation: 'update', dataTableId: table(T.schedule),
+      matchType: 'allConditions',
+      filters: { conditions: [{ id: 'c0', keyName: 'id', condition: 'eq',
+        keyValue: '={{ $json.requeue_row_id }}' }] },
+      columns: cols({
+        board_slug: '={{ $json.board_slug }}',
+        scheduled_at: '={{ $json.scheduled_at }}',
+        status: '={{ $json.status }}',
+        post_text: '={{ $json.post_text }}',
+        fb_post_id: '',
+        fb_media_id: '',
+        error: '',
+        attempts: 0,
+        posted_at: '={{ null }}',
+        last_attempt_at: '={{ null }}',
+      }), options: {} },
+    notes: 'Resets a served-cooldown row back to queued and clears the old '
+         + 'Facebook id, error and posted_at.' },
+
   { id: 'dt-log', name: 'Write Build Log', type: 'n8n-nodes-base.dataTable',
-    typeVersion: 1.1, position: [2180, 20], alwaysOutputData: true,
+    typeVersion: 1.1, position: [2180, 260], alwaysOutputData: true,
     parameters: { resource: 'row', operation: 'insert', dataTableId: table(T.errors),
       columns: cols({
         workflow: '={{ $json.workflow }}',
@@ -166,8 +196,9 @@ const connections = {
   'Load Items': { main: [[m('Items Loaded')]] },
   'Items Loaded': { main: [[m('Load Schedule')]] },
   'Load Schedule': { main: [[m('Plan Schedule')]] },
-  'Plan Schedule': { main: [[m('Queue Or Report?')]] },
-  'Queue Or Report?': { main: [[m('Insert Queue Row')], [m('Write Build Log')]] },
+  'Plan Schedule': { main: [[m('New Queue Row?')]] },
+  'New Queue Row?': { main: [[m('Insert Queue Row')], [m('Repost Or Report?')]] },
+  'Repost Or Report?': { main: [[m('Update Queue Row')], [m('Write Build Log')]] },
 };
 
 const TEST_TRIGGER = process.argv.includes('--test-trigger');

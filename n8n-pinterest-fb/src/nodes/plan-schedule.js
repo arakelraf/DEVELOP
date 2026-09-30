@@ -35,7 +35,10 @@ const plan = planSchedule({
 
 const out = [];
 
-for (const row of plan.toInsert) {
+// Inserts and requeues share the same caption logic; only the write differs.
+// A requeue carries requeue_row_id so Workflow B UPDATES that row, which is
+// what keeps schedule.etsy_listing_id unique across reposts.
+for (const row of [...plan.toInsert, ...plan.toRequeue]) {
   const it = row._item || {};
   const text = buildPostText({
     title: it.title,
@@ -47,7 +50,8 @@ for (const row of plan.toInsert) {
   });
 
   out.push({ json: {
-    _kind: 'queue',
+    _kind: row.requeue_row_id == null ? 'queue' : 'requeue',
+    requeue_row_id: row.requeue_row_id ?? null,
     etsy_listing_id: row.etsy_listing_id,
     board_slug: row.board_slug,
     scheduled_at: row.scheduled_at,
@@ -74,6 +78,8 @@ const report = {
   context: 'build_summary',
   created_at: new Date(nowMs).toISOString(),
   added: plan.report.added,
+  inserted: plan.report.inserted,
+  requeued: plan.report.requeued,
   already_scheduled: plan.report.already_scheduled,
   skipped: plan.report.skipped,
   unplaced: plan.report.unplaced,
@@ -82,7 +88,8 @@ const report = {
   text_mode: cfg.TEXT_MODE,
   already_list: plan.already.map((a) =>
     `Listing ${a.etsy_listing_id} "${String(a.title).slice(0, 60)}" `
-    + `is already scheduled for ${a.scheduled_at}`),
+    + `is already scheduled for ${a.scheduled_at}`
+    + (a.status && a.status !== 'queued' ? ` (status: ${a.status})` : '')),
   skipped_breakdown: plan.skipped.reduce((acc, s) => {
     acc[s.reason] = (acc[s.reason] || 0) + 1;
     return acc;
@@ -99,7 +106,9 @@ const report = {
     ? 'No board is enabled, so nothing can be queued. Enable a board in the '
       + 'boards table or via Workflow D.'
     : plan.report.added
-      ? `Queued ${plan.report.added} post(s) across slots ${cfg.SLOTS} ${cfg.TIMEZONE}.`
+      ? `Queued ${plan.report.added} post(s) across slots ${cfg.SLOTS} `
+        + `${cfg.TIMEZONE} (${plan.report.inserted} new, `
+        + `${plan.report.requeued} reposted after the cooldown).`
       : 'Nothing new to queue - every eligible listing is already scheduled, '
         + 'posted recently, or its boards are disabled.',
 };

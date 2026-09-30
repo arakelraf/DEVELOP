@@ -17,6 +17,9 @@ const DEFAULTS = {
   PIN_RESOLVE_MAX_PER_RUN: '10',
   RESOLVE_THROTTLE_MS: '2000',
   RESOLVE_MAX_ATTEMPTS: '3',
+  DRY_RUN: 'true',
+  MAX_PUBLISH_PER_RUN: '20',
+  FB_API_VERSION: 'v21.0',
 };
 
 const cfg = { ...DEFAULTS };
@@ -34,5 +37,9 @@ cfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);
 cfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);
 cfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);
 cfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);
+cfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);
+cfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);
+// Anything but an explicit "false" keeps the safety on.
+cfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';
 
 return [{ json: cfg }];
