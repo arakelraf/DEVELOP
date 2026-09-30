@@ -1,0 +1,987 @@
+{
+  "name": "D - Control",
+  "nodes": [
+    {
+      "id": "sn-d",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        -420
+      ],
+      "parameters": {
+        "width": 540,
+        "height": 400,
+        "color": 6,
+        "content": "## D - Control\n\nClick **Execute workflow**, open the form link, pick an action.\n\n**Today's / Tomorrow's posts** is the no-API path: caption, image URL\nand time for each post, ready to paste into Meta Business Suite. The\nhard part - what to post, when, with which image, no repeats, boards\nrotating - is already decided.\n\n**Queue for the next 7 days** shows entry ids (the `#`), which\nreschedule and remove take.\n\nRead-only actions answer straight away. Anything that writes is\nvalidated first, so a typo never half-applies."
+      }
+    },
+    {
+      "id": "sn-d2",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        20
+      ],
+      "parameters": {
+        "width": 540,
+        "height": 280,
+        "color": 4,
+        "content": "### Enabling and disabling a board\n\n`enabled` controls **publishing**, never collection - a disabled board\nkeeps accumulating pins so that turning it on later has a backlog.\n\nDisabling moves queued entries to `skipped`, but **only** those whose\nlisting belongs to no other enabled board. A listing pinned on two\nboards keeps its slot while either one is on.\n\nEnabling restores exactly the entries that were skipped."
+      }
+    },
+    {
+      "id": "trg-form",
+      "name": "Control Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -40,
+        -120
+      ],
+      "parameters": {
+        "formTitle": "Pinterest to Facebook - control",
+        "formDescription": "Pick an action. Only the fields that action needs have to be filled; leave the rest empty.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Action",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Today's posts (copy-paste list)"
+                  },
+                  {
+                    "option": "Tomorrow's posts (copy-paste list)"
+                  },
+                  {
+                    "option": "Queue for the next 7 days"
+                  },
+                  {
+                    "option": "Check a listing"
+                  },
+                  {
+                    "option": "Boards: show all"
+                  },
+                  {
+                    "option": "Board: enable"
+                  },
+                  {
+                    "option": "Board: disable"
+                  },
+                  {
+                    "option": "Board: add a new one"
+                  },
+                  {
+                    "option": "Entry: reschedule"
+                  },
+                  {
+                    "option": "Entry: remove"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Etsy URL or listing id",
+              "fieldType": "text",
+              "placeholder": "https://www.etsy.com/listing/4573408504/... or 4573408504"
+            },
+            {
+              "fieldLabel": "Board slug (for enable / disable)",
+              "fieldType": "text",
+              "placeholder": "usefull-toolskits"
+            },
+            {
+              "fieldLabel": "New board: Pinterest username",
+              "fieldType": "text",
+              "placeholder": "irobotsvc  (or leave empty and paste a board URL below)"
+            },
+            {
+              "fieldLabel": "New board: slug, name or pasted URL",
+              "fieldType": "text",
+              "placeholder": "printable-wall-art"
+            },
+            {
+              "fieldLabel": "New board: display name",
+              "fieldType": "text",
+              "placeholder": "Printable Wall Art"
+            },
+            {
+              "fieldLabel": "New board: priority",
+              "fieldType": "number",
+              "placeholder": "10 - higher goes first in the rotation"
+            },
+            {
+              "fieldLabel": "Entry id (the # from the queue view)",
+              "fieldType": "text",
+              "placeholder": "7"
+            },
+            {
+              "fieldLabel": "New time (e.g. 2026-10-05T14:00:00Z)",
+              "fieldType": "text",
+              "placeholder": "2026-10-05T14:00:00Z"
+            }
+          ]
+        },
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "dt-config",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Fzx5awBGnmaDaffF"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Flattens the config table into one object so later nodes can read settings\n// as $('Config').first().json.SLOTS instead of searching rows.\n// Defaults are applied for any key missing from the table, so the workflow\n// still runs on a fresh install. Mode: Run Once for All Items.\n\nconst DEFAULTS = {\n  TIMEZONE: 'Europe/Belgrade',\n  SLOTS: '10:00,15:00,20:00',\n  TEXT_MODE: 'pinterest',\n  REPOST_AFTER_DAYS: '60',\n  SCHEDULE_HORIZON_DAYS: '14',\n  MAX_QUEUE_PER_RUN: '60',\n  RETRY_DELAY_MINUTES: '30',\n  EXTRA_HASHTAGS: '',\n  POST_TEXT_MAX_CHARS: '600',\n  FB_PAGE_ID: '',\n  PIN_RESOLVE_MAX_PER_RUN: '10',\n  RESOLVE_THROTTLE_MS: '2000',\n  RESOLVE_MAX_ATTEMPTS: '3',\n  DRY_RUN: 'true',\n  MAX_PUBLISH_PER_RUN: '20',\n  FB_API_VERSION: 'v21.0',\n  AUTH_MODE: 'oauth',\n};\n\nconst cfg = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.key) cfg[String(r.key)] = r.value == null ? '' : String(r.value);\n}\n\n// Typed views, so consumers never re-parse strings.\ncfg._slots = String(cfg.SLOTS).split(',').map((s) => s.trim()).filter(Boolean);\ncfg._repost_after_days = Number(cfg.REPOST_AFTER_DAYS) || 0;\ncfg._resolve_max = Math.max(1, Number(cfg.PIN_RESOLVE_MAX_PER_RUN) || 10);\ncfg._throttle_ms = Math.max(0, Number(cfg.RESOLVE_THROTTLE_MS) || 0);\ncfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);\ncfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);\ncfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);\ncfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);\ncfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);\ncfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);\n// Anything but an explicit \"false\" keeps the safety on.\ncfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';\n// Anything other than an explicit \"token\" means the OAuth login path.\ncfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'\n  ? 'token' : 'oauth';\n\nreturn [{ json: cfg }];\n"
+      }
+    },
+    {
+      "id": "dt-boards",
+      "name": "Load Boards",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eHP9QfDm4Ay8F0HE"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "gt-boards",
+      "name": "Boards Loaded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Collapses the branch to ONE item so the next data-table read runs\n// once. Rows stay reachable via $('Load Boards').all().\n// Mode: Run Once for All Items.\n\nreturn [{ json: { loaded: $input.all().length } }];\n"
+      },
+      "alwaysOutputData": true,
+      "notes": "Single-item gate - keeps the next table read from running N times."
+    },
+    {
+      "id": "dt-items",
+      "name": "Load Items",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "JaT1fvUeN6R77Pg2"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "gt-items",
+      "name": "Items Loaded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Collapses the branch to ONE item so the next data-table read runs\n// once. Rows stay reachable via $('Load Items').all().\n// Mode: Run Once for All Items.\n\nreturn [{ json: { loaded: $input.all().length } }];\n"
+      },
+      "alwaysOutputData": true,
+      "notes": "Single-item gate - keeps the next table read from running N times."
+    },
+    {
+      "id": "dt-sched",
+      "name": "Load Schedule",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1520,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-parse",
+      "name": "Parse Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Board input normalization: turn whatever the user types into a username,\n * a board slug and an RSS URL.\n *\n * Used by the feed probe and by Workflow D's \"add board\" form, so a board\n * added through the UI and a board tested by hand always produce the same\n * rss_url. Part of the Pinterest source layer.\n *\n * The forms accept sloppy input on purpose - a pasted board URL, a profile\n * URL, an @handle, a display name - because the user fills them in by hand.\n */\n\nconst PINTEREST_HOST_RE = /^https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\//i;\n\n/** \"@SmartlyDigit\", \"pinterest.com/smartlydigit/\", \"SmartlyDigit\" -> \"smartlydigit\" */\nfunction normalizeUsername(input) {\n  let s = String(input || '').trim();\n  if (!s) return '';\n  if (PINTEREST_HOST_RE.test(s)) {\n    const m = s.replace(PINTEREST_HOST_RE, '').split(/[/?#]/).filter(Boolean);\n    s = m[0] || '';\n  }\n  s = s.replace(/^@/, '').trim().toLowerCase();\n  // Pinterest usernames: letters, digits, underscore; no spaces.\n  s = s.replace(/[^a-z0-9_]/g, '');\n  return s;\n}\n\n/** \"Printable Wall Art!\" -> \"printable-wall-art\"; already-slug passes through. */\nfunction slugify(input) {\n  return String(input || '')\n    .trim()\n    .toLowerCase()\n    .replace(/&/g, ' and ')\n    .replace(/['’]/g, '')\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '')\n    .slice(0, 80);\n}\n\n/**\n * Pull username and/or slug out of a pasted Pinterest URL.\n * Returns {} when the string is not a Pinterest URL.\n */\nfunction fromPinterestUrl(input) {\n  const s = String(input || '').trim();\n  if (!PINTEREST_HOST_RE.test(s)) return {};\n  const parts = s.replace(PINTEREST_HOST_RE, '').split(/[?#]/)[0]\n    .split('/').filter(Boolean);\n  if (!parts.length) return {};\n  const out = { username: normalizeUsername(parts[0]) };\n  if (parts[1]) {\n    // Tolerate a pasted \".../board.rss\" too.\n    out.board_slug = slugify(parts[1].replace(/\\.rss$/i, ''));\n  }\n  // /pin/12345/ is a pin, not a board - do not mistake it for a slug.\n  if (out.board_slug === 'pin' || /^\\d+$/.test(out.board_slug || '')) {\n    delete out.board_slug;\n  }\n  return out;\n}\n\n/**\n * Resolve the two form fields into a board definition.\n *\n * Either field may carry a full URL; a URL in the board field wins, because\n * that is what a user pasting a board link expects.\n *\n * @returns {{ok:true, username, board_slug, rss_url}|{ok:false, error}}\n */\nfunction resolveBoard(usernameInput, boardInput) {\n  const fromBoard = fromPinterestUrl(boardInput);\n  const fromUser = fromPinterestUrl(usernameInput);\n\n  const username = fromBoard.username\n    || fromUser.username\n    || normalizeUsername(usernameInput);\n\n  const board_slug = fromBoard.board_slug\n    || (fromBoard.username ? '' : slugify(boardInput))\n    || fromUser.board_slug\n    || '';\n\n  if (!username) {\n    return { ok: false, error:\n      'Could not read a Pinterest username. Enter it as it appears in your '\n      + 'profile URL (pinterest.com/USERNAME), or paste the profile URL.' };\n  }\n  if (!board_slug) {\n    return { ok: false, error:\n      'Could not read a board slug. Enter the last part of the board URL '\n      + '(pinterest.com/username/BOARD-SLUG), or paste the board URL.' };\n  }\n  return { ok: true, username, board_slug, rss_url: buildRssUrl(username, board_slug) };\n}\n\nfunction buildRssUrl(username, board_slug) {\n  return `https://www.pinterest.com/${username}/${board_slug}.rss`;\n}\n\n/**\n * Workflow D - control surface logic. Pure functions, no n8n, no clock.\n *\n * Every view and action the operator has: read the queue, look a listing up,\n * toggle a board, add one, reschedule or drop an entry, and produce the\n * copy-paste list for posting by hand when the Graph API is not available.\n *\n * Source-agnostic: works from boards / items / schedule keyed on\n * etsy_listing_id.\n */\n\n// resolveBoard comes from the inlined board-url module above.\n\nconst DAY_MS = 86_400_000;\nconst PENDING = new Set(['queued', 'posting', 'scheduled']);\n\nfunction parseList(v) {\n  if (Array.isArray(v)) return v.map(String);\n  if (typeof v === 'string' && v.trim()) {\n    try {\n      const p = JSON.parse(v);\n      if (Array.isArray(p)) return p.map(String);\n      if (typeof p === 'string') return [p];\n    } catch { return [v]; }\n  }\n  return [];\n}\n\n/** Accepts an Etsy URL in any shape, or a bare listing id. */\nfunction parseListingRef(input) {\n  const s = String(input || '').trim();\n  if (!s) return '';\n  const m = s.match(/listing\\/(\\d{6,15})/i);\n  if (m) return m[1];\n  if (/^\\d{6,15}$/.test(s)) return s;\n  return '';\n}\n\n/** Wall-clock rendering in the operator's zone, for every view. */\nfunction localTime(iso, timeZone) {\n  const t = Date.parse(iso);\n  if (!Number.isFinite(t)) return String(iso || '');\n  return new Intl.DateTimeFormat('en-GB', {\n    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', hour12: false,\n  }).format(new Date(t)).replace(',', '');\n}\n\nfunction localDate(iso, timeZone) {\n  const t = Date.parse(iso);\n  if (!Number.isFinite(t)) return '';\n  return new Intl.DateTimeFormat('en-CA', {\n    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',\n  }).format(new Date(t));\n}\n\nfunction indexItems(items) {\n  const byId = new Map();\n  for (const it of items) {\n    if (it && it.etsy_listing_id) byId.set(String(it.etsy_listing_id), it);\n  }\n  return byId;\n}\n\n// ------------------------------------------------------------------- views\n\n/**\n * The posts due in a given local day, ready to paste by hand.\n * This is the no-API path: everything decided, nothing sent.\n */\nfunction todaysPosts({ scheduleRows = [], items = [], timeZone = 'UTC',\n                       nowMs = Date.now(), dayOffset = 0 } = {}) {\n  const byId = indexItems(items);\n  const target = localDate(new Date(nowMs + dayOffset * DAY_MS).toISOString(), timeZone);\n\n  const due = scheduleRows\n    .filter((r) => PENDING.has(String(r.status || '')))\n    .filter((r) => localDate(r.scheduled_at, timeZone) === target)\n    .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));\n\n  return {\n    date: target,\n    timezone: timeZone,\n    count: due.length,\n    posts: due.map((r) => {\n      const it = byId.get(String(r.etsy_listing_id)) || {};\n      return {\n        row_id: r.id,\n        time: localTime(r.scheduled_at, timeZone).slice(-5),\n        scheduled_at: r.scheduled_at,\n        status: r.status,\n        etsy_listing_id: r.etsy_listing_id,\n        board_slug: r.board_slug,\n        image_url: it.image_url || '',\n        post_text: r.post_text || '',\n        missing_item: !byId.has(String(r.etsy_listing_id)),\n      };\n    }),\n  };\n}\n\n/** Grouped queue for the next N days. */\nfunction queueView({ scheduleRows = [], items = [], timeZone = 'UTC',\n                     nowMs = Date.now(), days = 7 } = {}) {\n  const byId = indexItems(items);\n  const until = nowMs + days * DAY_MS;\n\n  const rows = scheduleRows\n    .filter((r) => PENDING.has(String(r.status || '')))\n    .filter((r) => {\n      const t = Date.parse(r.scheduled_at);\n      return Number.isFinite(t) && t <= until;\n    })\n    .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));\n\n  const byDay = new Map();\n  for (const r of rows) {\n    const d = localDate(r.scheduled_at, timeZone);\n    if (!byDay.has(d)) byDay.set(d, []);\n    const it = byId.get(String(r.etsy_listing_id)) || {};\n    byDay.get(d).push({\n      row_id: r.id,\n      time: localTime(r.scheduled_at, timeZone).slice(-5),\n      status: r.status,\n      etsy_listing_id: r.etsy_listing_id,\n      board_slug: r.board_slug,\n      title: String(it.title || '').slice(0, 70),\n    });\n  }\n\n  return {\n    days,\n    timezone: timeZone,\n    total: rows.length,\n    by_day: [...byDay.entries()].map(([date, entries]) => ({ date, entries })),\n  };\n}\n\n/** Everything known about one listing. */\nfunction checkListing({ ref = '', scheduleRows = [], items = [],\n                        timeZone = 'UTC' } = {}) {\n  const id = parseListingRef(ref);\n  if (!id) {\n    return { ok: false,\n      error: `Could not read a listing id from \"${ref}\". Paste the Etsy URL `\n        + 'or just the numeric id.' };\n  }\n\n  const item = indexItems(items).get(id) || null;\n  const rows = scheduleRows.filter((r) => String(r.etsy_listing_id) === id);\n  const row = rows.sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;\n\n  let verdict;\n  if (!row) {\n    verdict = item\n      ? 'not scheduled'\n      : 'unknown - no items row either, so the sync has never seen this listing';\n  } else if (PENDING.has(String(row.status))) {\n    verdict = `already scheduled for ${localTime(row.scheduled_at, timeZone)} `\n      + `(${timeZone})`\n      + (row.status === 'scheduled' ? ' - already handed to Facebook' : '')\n      + (row.status === 'posting' ? ' - being published right now' : '');\n  } else if (row.status === 'posted') {\n    verdict = `posted on ${localTime(row.posted_at || row.scheduled_at, timeZone)}`;\n  } else if (row.status === 'failed') {\n    verdict = `failed after ${row.attempts || 0} attempt(s): ${row.error || 'no error recorded'}`;\n  } else if (row.status === 'skipped') {\n    verdict = 'skipped - its boards were disabled';\n  } else {\n    verdict = `unknown status \"${row.status}\"`;\n  }\n\n  return {\n    ok: true,\n    etsy_listing_id: id,\n    etsy_url: item ? item.etsy_url : `https://www.etsy.com/listing/${id}`,\n    verdict,\n    in_items: Boolean(item),\n    title: item ? String(item.title || '').slice(0, 120) : '',\n    boards: item ? parseList(item.board_slugs) : [],\n    image_url: item ? item.image_url || '' : '',\n    row: row ? {\n      row_id: row.id, status: row.status,\n      scheduled_at: row.scheduled_at, scheduled_local: localTime(row.scheduled_at, timeZone),\n      posted_at: row.posted_at, attempts: row.attempts, error: row.error,\n      fb_post_id: row.fb_post_id,\n    } : null,\n    can_queue_now: Boolean(item) && !row,\n  };\n}\n\n/** Board list with what each one is actually contributing. */\nfunction boardsView({ boards = [], items = [], scheduleRows = [] } = {}) {\n  const pendingByBoard = {};\n  for (const r of scheduleRows) {\n    if (!PENDING.has(String(r.status || ''))) continue;\n    const b = String(r.board_slug || '');\n    pendingByBoard[b] = (pendingByBoard[b] || 0) + 1;\n  }\n  const itemsByBoard = {};\n  for (const it of items) {\n    for (const b of parseList(it.board_slugs)) {\n      itemsByBoard[b] = (itemsByBoard[b] || 0) + 1;\n    }\n  }\n\n  return {\n    count: boards.length,\n    boards: boards\n      .slice()\n      .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0)\n        || String(a.board_slug).localeCompare(String(b.board_slug)))\n      .map((b) => ({\n        board_slug: b.board_slug,\n        name: b.name || b.board_slug,\n        enabled: b.enabled === true,\n        priority: Number(b.priority) || 0,\n        rss_url: b.rss_url,\n        last_synced_at: b.last_synced_at || null,\n        listings: itemsByBoard[b.board_slug] || 0,\n        queued_now: pendingByBoard[b.board_slug] || 0,\n      })),\n  };\n}\n\n// ----------------------------------------------------------------- actions\n\n/**\n * Turning a board off must not silently strand its queue, and turning it back\n * on must undo exactly that.\n *\n * Disabling: queued rows whose listing belongs ONLY to disabled boards become\n * skipped. A listing that also sits on an enabled board keeps its slot.\n * Enabling: skipped rows whose listing now has an enabled board go back to\n * queued.\n */\nfunction planCascade({ boards = [], items = [], scheduleRows = [] } = {}) {\n  const enabled = new Set(\n    boards.filter((b) => b.enabled === true).map((b) => String(b.board_slug))\n  );\n  const byId = indexItems(items);\n  const updates = [];\n\n  for (const r of scheduleRows) {\n    const status = String(r.status || '');\n    const it = byId.get(String(r.etsy_listing_id));\n    if (!it) continue;\n    const hasEnabled = parseList(it.board_slugs).some((b) => enabled.has(b));\n\n    if (PENDING.has(status) && !hasEnabled) {\n      updates.push({ row_id: r.id, etsy_listing_id: r.etsy_listing_id,\n        status: 'skipped',\n        error: 'Every board for this listing is disabled.',\n        reason: 'board_disabled' });\n    } else if (status === 'skipped' && hasEnabled) {\n      updates.push({ row_id: r.id, etsy_listing_id: r.etsy_listing_id,\n        status: 'queued', error: '', reason: 'board_re_enabled' });\n    }\n  }\n\n  return {\n    updates,\n    summary: {\n      to_skip: updates.filter((u) => u.reason === 'board_disabled').length,\n      to_restore: updates.filter((u) => u.reason === 'board_re_enabled').length,\n      enabled_boards: [...enabled],\n    },\n  };\n}\n\n/** Validate an \"add board\" request into a row ready to insert. */\nfunction planAddBoard({ username = '', board = '', name = '', priority = 0,\n                        existing = [] } = {}) {\n  const r = resolveBoard(username, board);\n  if (!r.ok) return { ok: false, error: r.error };\n\n  if (existing.some((b) => String(b.board_slug) === r.board_slug)) {\n    return { ok: false,\n      error: `Board \"${r.board_slug}\" is already in the table. Use the toggle `\n        + 'action to enable or disable it.' };\n  }\n\n  return {\n    ok: true,\n    row: {\n      board_slug: r.board_slug,\n      name: String(name || '').trim() || r.board_slug,\n      rss_url: r.rss_url,\n      // New boards start disabled on purpose: sync collects their pins, and\n      // nothing is published until you turn them on deliberately.\n      enabled: false,\n      priority: Number(priority) || 0,\n      last_synced_at: null,\n    },\n    note: `Added disabled. Run \"A - Sync Boards\" to collect its pins, then `\n      + 'enable it when you are ready to post from it.',\n  };\n}\n\n/** Validate a reschedule/remove request against the actual row. */\nfunction planEntryAction({ action = '', rowId = '', newTime = '',\n                           scheduleRows = [], timeZone = 'UTC',\n                           nowMs = Date.now() } = {}) {\n  const id = String(rowId || '').trim();\n  const row = scheduleRows.find((r) => String(r.id) === id);\n  if (!row) {\n    return { ok: false,\n      error: `No schedule entry with id ${id || '(empty)'}. The queue view `\n        + 'lists the ids.' };\n  }\n\n  if (action === 'remove') {\n    if (row.status === 'scheduled') {\n      return { ok: false,\n        error: `Entry ${id} was already handed to Facebook (fb_post_id `\n          + `${row.fb_post_id || 'unknown'}). Removing the row here would NOT `\n          + 'unpublish it - delete the scheduled post in Meta Business Suite '\n          + 'first, then remove the row.' };\n    }\n    return { ok: true, action: 'remove', row_id: row.id,\n      note: `Entry ${id} for listing ${row.etsy_listing_id} will be deleted. `\n        + 'The listing becomes eligible for queueing again on the next run of '\n        + 'Workflow B.' };\n  }\n\n  // reschedule\n  const t = Date.parse(newTime);\n  if (!Number.isFinite(t)) {\n    return { ok: false,\n      error: `Could not read \"${newTime}\" as a time. Use an ISO timestamp `\n        + 'like 2026-10-05T14:00:00Z, or 2026-10-05 16:00 for local time.' };\n  }\n  if (t <= nowMs) {\n    return { ok: false,\n      error: `${localTime(new Date(t).toISOString(), timeZone)} is in the past.` };\n  }\n  if (row.status === 'scheduled') {\n    return { ok: false,\n      error: `Entry ${id} is already scheduled on Facebook. Change the time in `\n        + 'Meta Business Suite, or remove it there and reschedule here.' };\n  }\n\n  return {\n    ok: true,\n    action: 'reschedule',\n    row_id: row.id,\n    scheduled_at: new Date(t).toISOString(),\n    // A failed row being rescheduled is a fresh start, so clear the failure.\n    status: 'queued',\n    note: `Entry ${id} moved to ${localTime(new Date(t).toISOString(), timeZone)} `\n      + `(${timeZone}) and reset to queued.`,\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Workflow D: read the form, answer everything read-only immediately, and\n// validate everything that writes before a single table is touched.\n// Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst tz = cfg.TIMEZONE;\nconst boards = $('Load Boards').all().map((i) => i.json || {}).filter((b) => b.board_slug);\nconst items = $('Load Items').all().map((i) => i.json || {}).filter((r) => r.etsy_listing_id);\nconst scheduleRows = $('Load Schedule').all().map((i) => i.json || {})\n  .filter((r) => r.etsy_listing_id);\n\nconst f = $('Control Form').first().json;\nconst get = (label) => String(f[label] ?? '').trim();\n\nconst ACTIONS = {\n  \"Today's posts (copy-paste list)\": 'today',\n  \"Tomorrow's posts (copy-paste list)\": 'tomorrow',\n  'Queue for the next 7 days': 'queue7',\n  'Check a listing': 'check',\n  'Boards: show all': 'boards',\n  'Board: enable': 'enable',\n  'Board: disable': 'disable',\n  'Board: add a new one': 'addboard',\n  'Entry: reschedule': 'reschedule',\n  'Entry: remove': 'remove',\n};\n\nconst label = get('Action');\nconst action = ACTIONS[label] || '';\n\nconst answer = (title, text, extra = {}) => [{ json: {\n  _kind: 'answer', title, text, ...extra } }];\n\nif (!action) {\n  return answer('Pick an action',\n    `\"${label}\" is not one of the actions. Choose one from the dropdown.`);\n}\n\n// ------------------------------------------------------- copy-paste lists\n//\n// This is the no-API path: everything is decided here - what, when, which\n// image, what caption - and you paste it into Meta Business Suite yourself.\nconst renderPosts = (view, heading) => {\n  if (!view.count) {\n    return answer(heading,\n      `Nothing scheduled for ${view.date} (${view.timezone}).\\n\\n`\n      + 'Run \"B - Build Schedule\" to fill the queue, and check that at least '\n      + 'one board is enabled.');\n  }\n  const blocks = view.posts.map((p, i) => [\n    `----- ${i + 1} of ${view.count} -----`,\n    `TIME (${view.timezone}): ${p.time}`,\n    `IMAGE: ${p.image_url || '(none - do not post this one)'}`,\n    p.missing_item ? 'WARNING: the items row for this listing is gone.' : '',\n    '',\n    'CAPTION (copy everything between the lines):',\n    '---8<---',\n    p.post_text,\n    '---8<---',\n    '',\n    `entry id ${p.row_id} | listing ${p.etsy_listing_id} | board ${p.board_slug}`,\n  ].filter(Boolean).join('\\n'));\n\n  return answer(`${heading} - ${view.count} post(s)`,\n    [`${view.date} (${view.timezone})`, '',\n      'Paste each caption into Meta Business Suite and attach the image at '\n      + 'the IMAGE url, then set the time shown.', '',\n      ...blocks,\n    ].join('\\n'),\n    { date: view.date, count: view.count });\n};\n\nif (action === 'today') {\n  return renderPosts(todaysPosts({ scheduleRows, items, timeZone: tz }), 'Posts due today');\n}\nif (action === 'tomorrow') {\n  return renderPosts(\n    todaysPosts({ scheduleRows, items, timeZone: tz, dayOffset: 1 }), 'Posts due tomorrow');\n}\n\nif (action === 'queue7') {\n  const v = queueView({ scheduleRows, items, timeZone: tz, days: 7 });\n  if (!v.total) {\n    return answer('Queue is empty',\n      'Nothing is queued for the next 7 days. Run \"B - Build Schedule\", and '\n      + 'check that a board is enabled.');\n  }\n  const lines = v.by_day.map((d) => [\n    `${d.date}`,\n    ...d.entries.map((e) =>\n      `   ${e.time}  #${e.row_id}  ${e.status.padEnd(9)} ${e.etsy_listing_id}  `\n      + `[${e.board_slug}]  ${e.title}`),\n  ].join('\\n'));\n  return answer(`Queue - ${v.total} entr${v.total === 1 ? 'y' : 'ies'} in 7 days`,\n    [`All times ${v.timezone}. The # is the entry id, for reschedule/remove.`,\n      '', ...lines].join('\\n'));\n}\n\nif (action === 'check') {\n  const r = checkListing({ ref: get('Etsy URL or listing id'), scheduleRows, items,\n    timeZone: tz });\n  if (!r.ok) return answer('Could not read that listing', r.error);\n  return answer(`Listing ${r.etsy_listing_id}`,\n    [`${r.verdict.toUpperCase()}`, '',\n      `Etsy:   ${r.etsy_url}`,\n      `Title:  ${r.title || '(not in items)'}`,\n      `Boards: ${r.boards.join(', ') || '(none)'}`,\n      `Image:  ${r.image_url || '(none)'}`,\n      '',\n      r.row\n        ? `Entry #${r.row.row_id} | status ${r.row.status}`\n          + ` | slot ${r.row.scheduled_local}`\n          + (r.row.attempts ? ` | attempts ${r.row.attempts}` : '')\n          + (r.row.error ? `\\nError: ${r.row.error}` : '')\n          + (r.row.fb_post_id ? `\\nFacebook post id: ${r.row.fb_post_id}` : '')\n        : r.can_queue_now\n          ? 'No schedule entry. The next run of \"B - Build Schedule\" will '\n            + 'queue it, provided one of its boards is enabled.'\n          : 'Not in items either - run \"A - Sync Boards\" first.',\n    ].join('\\n'));\n}\n\nif (action === 'boards') {\n  const v = boardsView({ boards, items, scheduleRows });\n  if (!v.count) {\n    return answer('No boards yet', 'Use \"Board: add a new one\" to add the first.');\n  }\n  const lines = v.boards.map((b) =>\n    `${b.enabled ? '[ON ]' : '[off]'} ${b.board_slug}`\n    + `\\n        name ${b.name} | priority ${b.priority}`\n    + `\\n        ${b.listings} listing(s) | ${b.queued_now} queued now`\n    + `\\n        last sync ${b.last_synced_at ? localTime(b.last_synced_at, tz) : 'never'}`\n    + `\\n        ${b.rss_url}`);\n  return answer(`Boards - ${v.count}`,\n    ['[ON] means its listings may be published. [off] still collects pins.',\n      '', ...lines].join('\\n'));\n}\n\n// -------------------------------------------------------- write actions\n// Validated here; the write itself happens in the branch downstream.\n\nif (action === 'enable' || action === 'disable') {\n  const slug = get('Board slug (for enable / disable)');\n  if (!slug) {\n    return answer('Which board?',\n      'Fill in \"Board slug (for enable / disable)\". Use \"Boards: show all\" to '\n      + 'see the slugs.');\n  }\n  const board = boards.find((b) => String(b.board_slug) === slug);\n  if (!board) {\n    return answer('No such board',\n      `There is no board \"${slug}\". Existing: `\n      + boards.map((b) => b.board_slug).join(', ') || '(none)');\n  }\n  const want = action === 'enable';\n  if (board.enabled === want) {\n    return answer('Nothing to change',\n      `Board \"${slug}\" is already ${want ? 'enabled' : 'disabled'}.`);\n  }\n  return [{ json: {\n    _kind: 'toggle', board_slug: slug, enabled: want,\n    board_name: board.name || slug,\n  } }];\n}\n\nif (action === 'addboard') {\n  const plan = planAddBoard({\n    username: get('New board: Pinterest username'),\n    board: get('New board: slug, name or pasted URL'),\n    name: get('New board: display name'),\n    priority: get('New board: priority'),\n    existing: boards,\n  });\n  if (!plan.ok) return answer('Could not add that board', plan.error);\n  return [{ json: { _kind: 'addboard', ...plan.row, note: plan.note } }];\n}\n\nif (action === 'reschedule' || action === 'remove') {\n  const plan = planEntryAction({\n    action,\n    rowId: get('Entry id (the # from the queue view)'),\n    newTime: get('New time (e.g. 2026-10-05T14:00:00Z)'),\n    scheduleRows, timeZone: tz,\n  });\n  if (!plan.ok) return answer('Could not do that', plan.error);\n  return [{ json: { _kind: plan.action, ...plan } }];\n}\n\nreturn answer('Not implemented', `Action \"${action}\" has no handler.`);\n"
+      },
+      "notes": "Answers read-only actions here; validates writes before any table is touched. Logic unit-tested in src/control.test.js (38 cases)."
+    },
+    {
+      "id": "if-answer",
+      "name": "Answer?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "answer",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "TRUE = a read-only answer, or a validation error. Nothing to write."
+    },
+    {
+      "id": "if-toggle",
+      "name": "Toggle?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "toggle",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-toggle",
+      "name": "Update Board Enabled",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2180,
+        60
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eHP9QfDm4Ay8F0HE"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "board_slug",
+              "condition": "eq",
+              "keyValue": "={{ $json.board_slug }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "enabled": "={{ $json.enabled }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-cascade",
+      "name": "Cascade Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        60
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Board input normalization: turn whatever the user types into a username,\n * a board slug and an RSS URL.\n *\n * Used by the feed probe and by Workflow D's \"add board\" form, so a board\n * added through the UI and a board tested by hand always produce the same\n * rss_url. Part of the Pinterest source layer.\n *\n * The forms accept sloppy input on purpose - a pasted board URL, a profile\n * URL, an @handle, a display name - because the user fills them in by hand.\n */\n\nconst PINTEREST_HOST_RE = /^https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\//i;\n\n/** \"@SmartlyDigit\", \"pinterest.com/smartlydigit/\", \"SmartlyDigit\" -> \"smartlydigit\" */\nfunction normalizeUsername(input) {\n  let s = String(input || '').trim();\n  if (!s) return '';\n  if (PINTEREST_HOST_RE.test(s)) {\n    const m = s.replace(PINTEREST_HOST_RE, '').split(/[/?#]/).filter(Boolean);\n    s = m[0] || '';\n  }\n  s = s.replace(/^@/, '').trim().toLowerCase();\n  // Pinterest usernames: letters, digits, underscore; no spaces.\n  s = s.replace(/[^a-z0-9_]/g, '');\n  return s;\n}\n\n/** \"Printable Wall Art!\" -> \"printable-wall-art\"; already-slug passes through. */\nfunction slugify(input) {\n  return String(input || '')\n    .trim()\n    .toLowerCase()\n    .replace(/&/g, ' and ')\n    .replace(/['’]/g, '')\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '')\n    .slice(0, 80);\n}\n\n/**\n * Pull username and/or slug out of a pasted Pinterest URL.\n * Returns {} when the string is not a Pinterest URL.\n */\nfunction fromPinterestUrl(input) {\n  const s = String(input || '').trim();\n  if (!PINTEREST_HOST_RE.test(s)) return {};\n  const parts = s.replace(PINTEREST_HOST_RE, '').split(/[?#]/)[0]\n    .split('/').filter(Boolean);\n  if (!parts.length) return {};\n  const out = { username: normalizeUsername(parts[0]) };\n  if (parts[1]) {\n    // Tolerate a pasted \".../board.rss\" too.\n    out.board_slug = slugify(parts[1].replace(/\\.rss$/i, ''));\n  }\n  // /pin/12345/ is a pin, not a board - do not mistake it for a slug.\n  if (out.board_slug === 'pin' || /^\\d+$/.test(out.board_slug || '')) {\n    delete out.board_slug;\n  }\n  return out;\n}\n\n/**\n * Resolve the two form fields into a board definition.\n *\n * Either field may carry a full URL; a URL in the board field wins, because\n * that is what a user pasting a board link expects.\n *\n * @returns {{ok:true, username, board_slug, rss_url}|{ok:false, error}}\n */\nfunction resolveBoard(usernameInput, boardInput) {\n  const fromBoard = fromPinterestUrl(boardInput);\n  const fromUser = fromPinterestUrl(usernameInput);\n\n  const username = fromBoard.username\n    || fromUser.username\n    || normalizeUsername(usernameInput);\n\n  const board_slug = fromBoard.board_slug\n    || (fromBoard.username ? '' : slugify(boardInput))\n    || fromUser.board_slug\n    || '';\n\n  if (!username) {\n    return { ok: false, error:\n      'Could not read a Pinterest username. Enter it as it appears in your '\n      + 'profile URL (pinterest.com/USERNAME), or paste the profile URL.' };\n  }\n  if (!board_slug) {\n    return { ok: false, error:\n      'Could not read a board slug. Enter the last part of the board URL '\n      + '(pinterest.com/username/BOARD-SLUG), or paste the board URL.' };\n  }\n  return { ok: true, username, board_slug, rss_url: buildRssUrl(username, board_slug) };\n}\n\nfunction buildRssUrl(username, board_slug) {\n  return `https://www.pinterest.com/${username}/${board_slug}.rss`;\n}\n\n/**\n * Workflow D - control surface logic. Pure functions, no n8n, no clock.\n *\n * Every view and action the operator has: read the queue, look a listing up,\n * toggle a board, add one, reschedule or drop an entry, and produce the\n * copy-paste list for posting by hand when the Graph API is not available.\n *\n * Source-agnostic: works from boards / items / schedule keyed on\n * etsy_listing_id.\n */\n\n// resolveBoard comes from the inlined board-url module above.\n\nconst DAY_MS = 86_400_000;\nconst PENDING = new Set(['queued', 'posting', 'scheduled']);\n\nfunction parseList(v) {\n  if (Array.isArray(v)) return v.map(String);\n  if (typeof v === 'string' && v.trim()) {\n    try {\n      const p = JSON.parse(v);\n      if (Array.isArray(p)) return p.map(String);\n      if (typeof p === 'string') return [p];\n    } catch { return [v]; }\n  }\n  return [];\n}\n\n/** Accepts an Etsy URL in any shape, or a bare listing id. */\nfunction parseListingRef(input) {\n  const s = String(input || '').trim();\n  if (!s) return '';\n  const m = s.match(/listing\\/(\\d{6,15})/i);\n  if (m) return m[1];\n  if (/^\\d{6,15}$/.test(s)) return s;\n  return '';\n}\n\n/** Wall-clock rendering in the operator's zone, for every view. */\nfunction localTime(iso, timeZone) {\n  const t = Date.parse(iso);\n  if (!Number.isFinite(t)) return String(iso || '');\n  return new Intl.DateTimeFormat('en-GB', {\n    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', hour12: false,\n  }).format(new Date(t)).replace(',', '');\n}\n\nfunction localDate(iso, timeZone) {\n  const t = Date.parse(iso);\n  if (!Number.isFinite(t)) return '';\n  return new Intl.DateTimeFormat('en-CA', {\n    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',\n  }).format(new Date(t));\n}\n\nfunction indexItems(items) {\n  const byId = new Map();\n  for (const it of items) {\n    if (it && it.etsy_listing_id) byId.set(String(it.etsy_listing_id), it);\n  }\n  return byId;\n}\n\n// ------------------------------------------------------------------- views\n\n/**\n * The posts due in a given local day, ready to paste by hand.\n * This is the no-API path: everything decided, nothing sent.\n */\nfunction todaysPosts({ scheduleRows = [], items = [], timeZone = 'UTC',\n                       nowMs = Date.now(), dayOffset = 0 } = {}) {\n  const byId = indexItems(items);\n  const target = localDate(new Date(nowMs + dayOffset * DAY_MS).toISOString(), timeZone);\n\n  const due = scheduleRows\n    .filter((r) => PENDING.has(String(r.status || '')))\n    .filter((r) => localDate(r.scheduled_at, timeZone) === target)\n    .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));\n\n  return {\n    date: target,\n    timezone: timeZone,\n    count: due.length,\n    posts: due.map((r) => {\n      const it = byId.get(String(r.etsy_listing_id)) || {};\n      return {\n        row_id: r.id,\n        time: localTime(r.scheduled_at, timeZone).slice(-5),\n        scheduled_at: r.scheduled_at,\n        status: r.status,\n        etsy_listing_id: r.etsy_listing_id,\n        board_slug: r.board_slug,\n        image_url: it.image_url || '',\n        post_text: r.post_text || '',\n        missing_item: !byId.has(String(r.etsy_listing_id)),\n      };\n    }),\n  };\n}\n\n/** Grouped queue for the next N days. */\nfunction queueView({ scheduleRows = [], items = [], timeZone = 'UTC',\n                     nowMs = Date.now(), days = 7 } = {}) {\n  const byId = indexItems(items);\n  const until = nowMs + days * DAY_MS;\n\n  const rows = scheduleRows\n    .filter((r) => PENDING.has(String(r.status || '')))\n    .filter((r) => {\n      const t = Date.parse(r.scheduled_at);\n      return Number.isFinite(t) && t <= until;\n    })\n    .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));\n\n  const byDay = new Map();\n  for (const r of rows) {\n    const d = localDate(r.scheduled_at, timeZone);\n    if (!byDay.has(d)) byDay.set(d, []);\n    const it = byId.get(String(r.etsy_listing_id)) || {};\n    byDay.get(d).push({\n      row_id: r.id,\n      time: localTime(r.scheduled_at, timeZone).slice(-5),\n      status: r.status,\n      etsy_listing_id: r.etsy_listing_id,\n      board_slug: r.board_slug,\n      title: String(it.title || '').slice(0, 70),\n    });\n  }\n\n  return {\n    days,\n    timezone: timeZone,\n    total: rows.length,\n    by_day: [...byDay.entries()].map(([date, entries]) => ({ date, entries })),\n  };\n}\n\n/** Everything known about one listing. */\nfunction checkListing({ ref = '', scheduleRows = [], items = [],\n                        timeZone = 'UTC' } = {}) {\n  const id = parseListingRef(ref);\n  if (!id) {\n    return { ok: false,\n      error: `Could not read a listing id from \"${ref}\". Paste the Etsy URL `\n        + 'or just the numeric id.' };\n  }\n\n  const item = indexItems(items).get(id) || null;\n  const rows = scheduleRows.filter((r) => String(r.etsy_listing_id) === id);\n  const row = rows.sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0] || null;\n\n  let verdict;\n  if (!row) {\n    verdict = item\n      ? 'not scheduled'\n      : 'unknown - no items row either, so the sync has never seen this listing';\n  } else if (PENDING.has(String(row.status))) {\n    verdict = `already scheduled for ${localTime(row.scheduled_at, timeZone)} `\n      + `(${timeZone})`\n      + (row.status === 'scheduled' ? ' - already handed to Facebook' : '')\n      + (row.status === 'posting' ? ' - being published right now' : '');\n  } else if (row.status === 'posted') {\n    verdict = `posted on ${localTime(row.posted_at || row.scheduled_at, timeZone)}`;\n  } else if (row.status === 'failed') {\n    verdict = `failed after ${row.attempts || 0} attempt(s): ${row.error || 'no error recorded'}`;\n  } else if (row.status === 'skipped') {\n    verdict = 'skipped - its boards were disabled';\n  } else {\n    verdict = `unknown status \"${row.status}\"`;\n  }\n\n  return {\n    ok: true,\n    etsy_listing_id: id,\n    etsy_url: item ? item.etsy_url : `https://www.etsy.com/listing/${id}`,\n    verdict,\n    in_items: Boolean(item),\n    title: item ? String(item.title || '').slice(0, 120) : '',\n    boards: item ? parseList(item.board_slugs) : [],\n    image_url: item ? item.image_url || '' : '',\n    row: row ? {\n      row_id: row.id, status: row.status,\n      scheduled_at: row.scheduled_at, scheduled_local: localTime(row.scheduled_at, timeZone),\n      posted_at: row.posted_at, attempts: row.attempts, error: row.error,\n      fb_post_id: row.fb_post_id,\n    } : null,\n    can_queue_now: Boolean(item) && !row,\n  };\n}\n\n/** Board list with what each one is actually contributing. */\nfunction boardsView({ boards = [], items = [], scheduleRows = [] } = {}) {\n  const pendingByBoard = {};\n  for (const r of scheduleRows) {\n    if (!PENDING.has(String(r.status || ''))) continue;\n    const b = String(r.board_slug || '');\n    pendingByBoard[b] = (pendingByBoard[b] || 0) + 1;\n  }\n  const itemsByBoard = {};\n  for (const it of items) {\n    for (const b of parseList(it.board_slugs)) {\n      itemsByBoard[b] = (itemsByBoard[b] || 0) + 1;\n    }\n  }\n\n  return {\n    count: boards.length,\n    boards: boards\n      .slice()\n      .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0)\n        || String(a.board_slug).localeCompare(String(b.board_slug)))\n      .map((b) => ({\n        board_slug: b.board_slug,\n        name: b.name || b.board_slug,\n        enabled: b.enabled === true,\n        priority: Number(b.priority) || 0,\n        rss_url: b.rss_url,\n        last_synced_at: b.last_synced_at || null,\n        listings: itemsByBoard[b.board_slug] || 0,\n        queued_now: pendingByBoard[b.board_slug] || 0,\n      })),\n  };\n}\n\n// ----------------------------------------------------------------- actions\n\n/**\n * Turning a board off must not silently strand its queue, and turning it back\n * on must undo exactly that.\n *\n * Disabling: queued rows whose listing belongs ONLY to disabled boards become\n * skipped. A listing that also sits on an enabled board keeps its slot.\n * Enabling: skipped rows whose listing now has an enabled board go back to\n * queued.\n */\nfunction planCascade({ boards = [], items = [], scheduleRows = [] } = {}) {\n  const enabled = new Set(\n    boards.filter((b) => b.enabled === true).map((b) => String(b.board_slug))\n  );\n  const byId = indexItems(items);\n  const updates = [];\n\n  for (const r of scheduleRows) {\n    const status = String(r.status || '');\n    const it = byId.get(String(r.etsy_listing_id));\n    if (!it) continue;\n    const hasEnabled = parseList(it.board_slugs).some((b) => enabled.has(b));\n\n    if (PENDING.has(status) && !hasEnabled) {\n      updates.push({ row_id: r.id, etsy_listing_id: r.etsy_listing_id,\n        status: 'skipped',\n        error: 'Every board for this listing is disabled.',\n        reason: 'board_disabled' });\n    } else if (status === 'skipped' && hasEnabled) {\n      updates.push({ row_id: r.id, etsy_listing_id: r.etsy_listing_id,\n        status: 'queued', error: '', reason: 'board_re_enabled' });\n    }\n  }\n\n  return {\n    updates,\n    summary: {\n      to_skip: updates.filter((u) => u.reason === 'board_disabled').length,\n      to_restore: updates.filter((u) => u.reason === 'board_re_enabled').length,\n      enabled_boards: [...enabled],\n    },\n  };\n}\n\n/** Validate an \"add board\" request into a row ready to insert. */\nfunction planAddBoard({ username = '', board = '', name = '', priority = 0,\n                        existing = [] } = {}) {\n  const r = resolveBoard(username, board);\n  if (!r.ok) return { ok: false, error: r.error };\n\n  if (existing.some((b) => String(b.board_slug) === r.board_slug)) {\n    return { ok: false,\n      error: `Board \"${r.board_slug}\" is already in the table. Use the toggle `\n        + 'action to enable or disable it.' };\n  }\n\n  return {\n    ok: true,\n    row: {\n      board_slug: r.board_slug,\n      name: String(name || '').trim() || r.board_slug,\n      rss_url: r.rss_url,\n      // New boards start disabled on purpose: sync collects their pins, and\n      // nothing is published until you turn them on deliberately.\n      enabled: false,\n      priority: Number(priority) || 0,\n      last_synced_at: null,\n    },\n    note: `Added disabled. Run \"A - Sync Boards\" to collect its pins, then `\n      + 'enable it when you are ready to post from it.',\n  };\n}\n\n/** Validate a reschedule/remove request against the actual row. */\nfunction planEntryAction({ action = '', rowId = '', newTime = '',\n                           scheduleRows = [], timeZone = 'UTC',\n                           nowMs = Date.now() } = {}) {\n  const id = String(rowId || '').trim();\n  const row = scheduleRows.find((r) => String(r.id) === id);\n  if (!row) {\n    return { ok: false,\n      error: `No schedule entry with id ${id || '(empty)'}. The queue view `\n        + 'lists the ids.' };\n  }\n\n  if (action === 'remove') {\n    if (row.status === 'scheduled') {\n      return { ok: false,\n        error: `Entry ${id} was already handed to Facebook (fb_post_id `\n          + `${row.fb_post_id || 'unknown'}). Removing the row here would NOT `\n          + 'unpublish it - delete the scheduled post in Meta Business Suite '\n          + 'first, then remove the row.' };\n    }\n    return { ok: true, action: 'remove', row_id: row.id,\n      note: `Entry ${id} for listing ${row.etsy_listing_id} will be deleted. `\n        + 'The listing becomes eligible for queueing again on the next run of '\n        + 'Workflow B.' };\n  }\n\n  // reschedule\n  const t = Date.parse(newTime);\n  if (!Number.isFinite(t)) {\n    return { ok: false,\n      error: `Could not read \"${newTime}\" as a time. Use an ISO timestamp `\n        + 'like 2026-10-05T14:00:00Z, or 2026-10-05 16:00 for local time.' };\n  }\n  if (t <= nowMs) {\n    return { ok: false,\n      error: `${localTime(new Date(t).toISOString(), timeZone)} is in the past.` };\n  }\n  if (row.status === 'scheduled') {\n    return { ok: false,\n      error: `Entry ${id} is already scheduled on Facebook. Change the time in `\n        + 'Meta Business Suite, or remove it there and reschedule here.' };\n  }\n\n  return {\n    ok: true,\n    action: 'reschedule',\n    row_id: row.id,\n    scheduled_at: new Date(t).toISOString(),\n    // A failed row being rescheduled is a fresh start, so clear the failure.\n    status: 'queued',\n    note: `Entry ${id} moved to ${localTime(new Date(t).toISOString(), timeZone)} `\n      + `(${timeZone}) and reset to queued.`,\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// After a board is toggled, decide which queue rows must follow.\n//\n// $('Load Boards') still holds the state from BEFORE the update, so the\n// toggle is applied in memory first - otherwise the cascade would be computed\n// against stale data.\n// Mode: Run Once for All Items.\n\nconst req = $('Parse Request').first().json;\nconst items = $('Load Items').all().map((i) => i.json || {}).filter((r) => r.etsy_listing_id);\nconst scheduleRows = $('Load Schedule').all().map((i) => i.json || {})\n  .filter((r) => r.etsy_listing_id);\n\nconst boards = $('Load Boards').all().map((i) => ({ ...(i.json || {}) }))\n  .filter((b) => b.board_slug)\n  .map((b) => String(b.board_slug) === String(req.board_slug)\n    ? { ...b, enabled: req.enabled } : b);\n\nconst plan = planCascade({ boards, items, scheduleRows });\n\nif (!plan.updates.length) {\n  return [{ json: { _kind: 'cascade_none', ...plan.summary,\n    board_slug: req.board_slug, enabled: req.enabled } }];\n}\n\nreturn plan.updates.map((u) => ({ json: {\n  _kind: 'cascade', ...u,\n  board_slug: req.board_slug, enabled: req.enabled,\n} }));\n"
+      },
+      "notes": "Applies the toggle in memory first, because Load Boards holds the pre-update state."
+    },
+    {
+      "id": "if-cascade",
+      "name": "Any Cascade?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2620,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "cascade",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-cascade",
+      "name": "Apply Cascade",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2840,
+        -20
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.status }}",
+            "error": "={{ $json.error }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-toggleres",
+      "name": "Toggle Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3060,
+        60
+      ],
+      "parameters": {
+        "jsCode": "// Renders the outcome of a board toggle, including what the cascade did.\n// Mode: Run Once for All Items.\n\nconst req = $('Parse Request').first().json;\n\nlet skipped = 0;\nlet restored = 0;\ntry {\n  for (const i of $('Cascade Plan').all()) {\n    const j = i.json || {};\n    if (j._kind !== 'cascade') continue;\n    if (j.status === 'skipped') skipped++;\n    if (j.status === 'queued') restored++;\n  }\n} catch { /* cascade produced nothing */ }\n\nconst state = req.enabled ? 'ENABLED' : 'DISABLED';\nconst lines = [`Board \"${req.board_slug}\" is now ${state}.`, ''];\n\nif (req.enabled) {\n  lines.push(restored\n    ? `${restored} previously skipped entr${restored === 1 ? 'y was' : 'ies were'} `\n      + 'put back in the queue.'\n    : 'No skipped entries needed restoring.');\n  lines.push('', 'Its listings can now be published. The next run of '\n    + '\"B - Build Schedule\" will queue any that are not scheduled yet.');\n} else {\n  lines.push(skipped\n    ? `${skipped} queued entr${skipped === 1 ? 'y was' : 'ies were'} moved to `\n      + 'skipped, because their listings belong only to disabled boards.'\n    : 'No queued entries were affected - their listings also sit on boards '\n      + 'that are still enabled.');\n  lines.push('', 'Pins keep being collected for this board; nothing new will '\n    + 'be published from it. Enabling it again restores exactly the entries '\n    + 'that were skipped.');\n}\n\nreturn [{ json: { title: `Board ${req.board_slug}: ${state}`, text: lines.join('\\n') } }];\n"
+      }
+    },
+    {
+      "id": "if-add",
+      "name": "Add Board?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "addboard",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-add",
+      "name": "Insert Board",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2180,
+        320
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eHP9QfDm4Ay8F0HE"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "board_slug": "={{ $json.board_slug }}",
+            "name": "={{ $json.name }}",
+            "rss_url": "={{ $json.rss_url }}",
+            "enabled": "={{ false }}",
+            "priority": "={{ $json.priority }}",
+            "last_synced_at": "={{ null }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "notes": "New boards start disabled by design."
+    },
+    {
+      "id": "if-resched",
+      "name": "Reschedule?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        640
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "reschedule",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-resched",
+      "name": "Update Entry",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2180,
+        560
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "scheduled_at": "={{ $json.scheduled_at }}",
+            "status": "={{ $json.status }}",
+            "error": "",
+            "attempts": 0,
+            "last_attempt_at": "={{ null }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "notes": "A reschedule is a fresh start, so the old failure and attempt count are cleared."
+    },
+    {
+      "id": "dt-remove",
+      "name": "Delete Entry",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2180,
+        780
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.row_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "The listing becomes eligible again on the next run of Workflow B."
+    },
+    {
+      "id": "cd-writeres",
+      "name": "Write Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        560
+      ],
+      "parameters": {
+        "jsCode": "// Renders the outcome of an add-board / reschedule / remove action.\n// Mode: Run Once for All Items.\n\nconst req = $('Parse Request').first().json;\n\nif (req._kind === 'addboard') {\n  return [{ json: {\n    title: `Board \"${req.board_slug}\" added`,\n    text: [\n      `slug     ${req.board_slug}`,\n      `name     ${req.name}`,\n      `priority ${req.priority}`,\n      `feed     ${req.rss_url}`,\n      `enabled  false`,\n      '',\n      req.note,\n    ].join('\\n'),\n  } }];\n}\n\nif (req._kind === 'reschedule') {\n  return [{ json: {\n    title: `Entry #${req.row_id} rescheduled`,\n    text: `${req.note}\\n\\nIt will be picked up by \"C - Publisher\" when its new `\n      + 'slot comes round.',\n  } }];\n}\n\nif (req._kind === 'remove') {\n  return [{ json: {\n    title: `Entry #${req.row_id} removed`,\n    text: req.note,\n  } }];\n}\n\nreturn [{ json: { title: 'Done', text: JSON.stringify(req, null, 2) } }];\n"
+      }
+    },
+    {
+      "id": "form-answer",
+      "name": "Show Answer",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3300,
+        -120
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "={{ $json.title }}",
+        "completionMessage": "={{ $json.text }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Control Form": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load Boards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Boards": {
+      "main": [
+        [
+          {
+            "node": "Boards Loaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Boards Loaded": {
+      "main": [
+        [
+          {
+            "node": "Load Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Items": {
+      "main": [
+        [
+          {
+            "node": "Items Loaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Items Loaded": {
+      "main": [
+        [
+          {
+            "node": "Load Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Schedule": {
+      "main": [
+        [
+          {
+            "node": "Parse Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Request": {
+      "main": [
+        [
+          {
+            "node": "Answer?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer?": {
+      "main": [
+        [
+          {
+            "node": "Show Answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Toggle?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toggle?": {
+      "main": [
+        [
+          {
+            "node": "Update Board Enabled",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add Board?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Board Enabled": {
+      "main": [
+        [
+          {
+            "node": "Cascade Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cascade Plan": {
+      "main": [
+        [
+          {
+            "node": "Any Cascade?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Cascade?": {
+      "main": [
+        [
+          {
+            "node": "Apply Cascade",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Toggle Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Cascade": {
+      "main": [
+        [
+          {
+            "node": "Toggle Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toggle Result": {
+      "main": [
+        [
+          {
+            "node": "Show Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Board?": {
+      "main": [
+        [
+          {
+            "node": "Insert Board",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reschedule?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Board": {
+      "main": [
+        [
+          {
+            "node": "Write Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reschedule?": {
+      "main": [
+        [
+          {
+            "node": "Update Entry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Entry": {
+      "main": [
+        [
+          {
+            "node": "Write Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Entry": {
+      "main": [
+        [
+          {
+            "node": "Write Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Result": {
+      "main": [
+        [
+          {
+            "node": "Show Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true
+  }
+}

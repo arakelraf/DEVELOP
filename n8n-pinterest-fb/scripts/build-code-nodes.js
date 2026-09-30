@@ -249,15 +249,26 @@ const NODE_MANIFEST = [
   { out: 'build/handle-publish-result.js', src: 'src/nodes/handle-publish-result.js',
     deps: [] },
   { out: 'build/publish-summary.js', src: 'src/nodes/publish-summary.js', deps: [] },
+  { out: 'build/parse-request.js', src: 'src/nodes/parse-request.js',
+    deps: ['boardurl', 'control'] },
+  { out: 'build/cascade-plan.js', src: 'src/nodes/cascade-plan.js',
+    deps: ['boardurl', 'control'] },
+  { out: 'build/toggle-result.js', src: 'src/nodes/toggle-result.js', deps: [] },
+  { out: 'build/write-result.js', src: 'src/nodes/write-result.js', deps: [] },
 ];
 
 const SCHEDULER = inlineModule('src/scheduler.js');
 const POSTTEXT = inlineModule('src/post-text.js');
 const PUBLISHER = inlineModule('src/publisher.js');
+// control.js requires board-url for resolveBoard; inline both and drop the
+// require so the Code node needs no module system.
+const CONTROL = inlineModule('src/control.js')
+  .replace(/^const \{ resolveBoard \} = require\('\.\/board-url\.js'\);$/m,
+           '// resolveBoard comes from the inlined board-url module above.');
 
 const DEP_SOURCE = {
   parser: PARSER, resolver: RESOLVER, scheduler: SCHEDULER, posttext: POSTTEXT,
-  publisher: PUBLISHER,
+  publisher: PUBLISHER, control: CONTROL, boardurl: BOARDURL,
 };
 
 const manifestTargets = {};
