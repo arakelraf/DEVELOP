@@ -21,6 +21,7 @@ Tables** for storage (no Postgres needed).
 | 00 - Feed Probe | `km7kN1d4wZ12gUXV` | Form | diagnose one board's feed |
 | 01 - Pin Resolver Probe | `F4bacz8xycWyGkKx` | webhook | diagnose Etsy-link recovery |
 | 02 - URL Check | `3npJ76d4byGKCXqJ` | webhook | what does the n8n server see at this URL |
+| 03 - Facebook Auth Check | `hUDLmGnurfQW3iSk` | webhook | is the Facebook login working, and which Page |
 
 All are **inactive** until you activate them. The three numbered probes are
 read-only diagnostics and write to no table.
@@ -259,6 +260,11 @@ docs/           the Facebook token walkthrough
 - **02 - URL Check** — `POST {"url":"…","method":"HEAD","preset":"image"}`;
   answers what the **n8n server** sees at a URL, which is the only machine
   whose view matters.
+- **03 - Facebook Auth Check** — `POST {}`; says whether the Facebook login
+  works and which Page would be posted to, **without publishing anything**.
+  Run it after connecting the credential and before setting `DRY_RUN=false`.
+  A dry run deliberately skips Facebook entirely, so this is the only way to
+  check the credential short of going live.
 - `scripts/heal-item-images.js [--apply]` — re-verifies downscaled images and
   upgrades them to the original.
 
