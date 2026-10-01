@@ -268,3 +268,17 @@ Rotate the n8n API key in Settings → API: it is committed in `.mcp.json` in
 this repository's history. Move it to an untracked file, or export
 `N8N_API_URL` and `N8N_API_KEY` in the environment — `scripts/n8n-api.js`
 prefers the environment and falls back to `.mcp.json`.
+
+## Getting the day's list outside n8n
+
+The form's completion screen is not saved anywhere. To get the same list as a
+file you can keep:
+
+```bash
+node scripts/todays-posts.js                       # today, to stdout
+node scripts/todays-posts.js 1                     # tomorrow
+node scripts/todays-posts.js 0 posts-today.md      # and write it to a file
+```
+
+It reads the tables directly, marks any slot that has already passed, and
+flags an entry whose image is missing.
