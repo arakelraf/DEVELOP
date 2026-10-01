@@ -275,6 +275,12 @@ this repository's history. Move it to an untracked file, or export
 `N8N_API_URL` and `N8N_API_KEY` in the environment — `scripts/n8n-api.js`
 prefers the environment and falls back to `.mcp.json`.
 
+## Running it
+
+`docs/operating.md` - what runs by itself, what you do, and the three things
+worth watching: the queue running dry, the Facebook login expiring at about
+60 days, and `errors_log`.
+
 ## Getting the day's list outside n8n
 
 The form's completion screen is not saved anywhere. To get the same list as a
