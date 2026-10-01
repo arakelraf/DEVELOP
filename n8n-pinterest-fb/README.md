@@ -11,6 +11,8 @@ Tables** for storage (no Postgres needed).
 
 ## What is deployed
 
+All of it lives in the n8n folder **PinToFB** (id `9oxp9jnUfnvI1KA8`).
+
 | Workflow | ID | Trigger | What it does |
 |---|---|---|---|
 | **A - Sync Boards** | `fwvz0DCV8qUgISNJ` | every 6h + manual | RSS → `pins` → resolve Etsy links → `items` |

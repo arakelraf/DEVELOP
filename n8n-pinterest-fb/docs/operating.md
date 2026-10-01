@@ -34,9 +34,21 @@ published from them.
 
 Three things, in order of how likely they are to bite.
 
-## 1. The queue running dry
+## 1. The queue keeping up
 
-This is the one that will happen first.
+The system can only post what Pinterest gives it. With the board gaining
+**7 new pins a day** and six posts going out a day, intake exceeds output by
+about one a day, so the queue sustains itself - as long as that pinning rate
+holds.
+
+The margin is thin, though, and two things eat into it:
+
+- a new pin pointing at a listing that is **already in `items`** adds nothing
+  to post - the listing is posted once, then not again for
+  `REPOST_AFTER_DAYS`
+- a day without pinning is a day the queue shrinks by six
+
+So this is worth a glance once a week rather than ignoring.
 
 The system can only post what Pinterest gives it: an RSS feed carries about
 25 pins, and each listing is posted once (then not again for
@@ -46,7 +58,7 @@ not create content - it spends the backlog faster.
 
 **Check:** D - Control → **Queue for the next 7 days**.
 
-If it is thin or empty:
+If it is thin or shrinking week on week:
 - pin more to the board — A picks new pins up within 6 hours, B queues them
   the next morning
 - or add another board (above)
