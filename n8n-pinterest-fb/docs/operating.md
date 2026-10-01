@@ -11,7 +11,8 @@ Everything is live. Nothing needs doing daily.
 | every 30 min | **C** hands due posts to Facebook. More than 10 minutes out → scheduled with `scheduled_publish_time`; slot already passed → published immediately |
 | on any crash | **E** writes it to `errors_log` |
 
-Posts go out at **10:00 / 15:00 / 20:00 Europe/Belgrade**, three a day.
+Posts go out at **09:00 / 11:00 / 13:00 / 15:00 / 17:00 / 20:00
+Europe/Belgrade**, six a day.
 
 ## What you actually do
 
@@ -39,8 +40,9 @@ This is the one that will happen first.
 
 The system can only post what Pinterest gives it: an RSS feed carries about
 25 pins, and each listing is posted once (then not again for
-`REPOST_AFTER_DAYS`, default 60). One board at three posts a day runs out in
-roughly a week.
+`REPOST_AFTER_DAYS`, default 60). At six posts a day one board runs
+out in about three days; at three a day, about a week. Raising the rate does
+not create content - it spends the backlog faster.
 
 **Check:** D - Control → **Queue for the next 7 days**.
 
@@ -92,7 +94,7 @@ with D - Control → **Entry: reschedule**.
 | Want | Do |
 |---|---|
 | different times | `config` → `SLOTS`, e.g. `09:00,13:00,18:00` |
-| more or fewer per day | add or remove entries in `SLOTS` |
+| more or fewer per day | add or remove entries in `SLOTS`, then run `node scripts/respread-queue.js --apply` to move the EXISTING queue onto the new grid - without it the change only affects what B queues next |
 | pause everything | deactivate **C - Publisher**; collection carries on |
 | pause one board | D - Control → **Board: disable** - its queued entries move to `skipped` and come back when you re-enable |
 | stop a single post | D - Control → **Entry: remove** (use the `#` from the queue view) |
