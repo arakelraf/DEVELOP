@@ -70,13 +70,15 @@ nothing new to queue, and C has nothing to publish.
 
 ## 2. The Facebook token
 
-Authentication now uses a **System User token** (system user "Johnadmin" in
-the Business, app PagePost, Page SmartlyDigit assigned), stored in the
-`Facebook User Token` credential with `AUTH_MODE=token`. If it was generated
-with expiration **Never**, it does not expire and there is no renewal chore.
+Authentication uses a **System User token** (system user "Johnadmin" in the
+Business, app PagePost, Page SmartlyDigit assigned), stored in the
+`Facebook User Token` credential with `AUTH_MODE=token`. It was generated with
+expiration **Never**, so it does not expire - there is no renewal chore. This
+is the one recurring task the OAuth login would have required, and it is gone.
 
-If it was generated with a 60-day expiry instead, it will stop working after
-that; the symptom is Graph error code 190 in `errors_log`.
+The only thing that would invalidate it: removing Johnadmin from the Business,
+un-assigning the Page or app from it, or revoking the token in Business
+Settings. The symptom of a dead token is Graph error code 190 in `errors_log`.
 
 **It fails safely:** nothing is double-posted, nothing is lost. Entries stay
 `queued` and go out once the login is renewed.
@@ -84,12 +86,11 @@ that; the symptom is Graph error code 190 in `errors_log`.
 **Symptom:** `errors_log` fills with Graph error **code 190**, and the queue
 stops moving.
 
-**Fix:** generate a fresh token for the Johnadmin system user
-(business.facebook.com → Business Settings → System Users → Johnadmin →
-Generate new token → app PagePost → the three page permissions → Never),
-and set it in the `Facebook User Token` credential as `Bearer <token>`.
-
-With a Never-expiry token this never comes up.
+**If it ever does break** (someone revokes it, or removes Johnadmin/the Page/
+the app in Business Settings): generate a fresh token for the Johnadmin system
+user (business.facebook.com → Business Settings → System Users → Johnadmin →
+Generate new token → app PagePost → the three page permissions → Never), and
+set it in the `Facebook User Token` credential as `Bearer <token>`.
 
 ## 3. Failures
 
