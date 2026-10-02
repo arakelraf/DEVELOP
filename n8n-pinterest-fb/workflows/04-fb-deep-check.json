@@ -138,6 +138,49 @@
       "alwaysOutputData": true
     },
     {
+      "id": "pg",
+      "name": "Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        340
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/1378170695380729",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
       "id": "rep",
       "name": "Report",
       "type": "n8n-nodes-base.code",
@@ -147,7 +190,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Mode: Run Once for All Items. Names and counts only - no tokens.\nconst body=(n)=>{try{const j=$(n).first().json;return j&&j.body!==undefined?j.body:j;}catch{return null;}};\nconst status=(n)=>{try{return $(n).first().json.statusCode;}catch{return null;}};\nconst me=body('Me'), perm=body('Permissions'), acc=body('Accounts');\nconst granted=(perm&&perm.data||[]).filter(p=>p.status==='granted').map(p=>p.permission);\nconst declined=(perm&&perm.data||[]).filter(p=>p.status!=='granted').map(p=>p.permission+':'+p.status);\nconst accErr=(acc&&acc.error)?(acc.error.type+' '+(acc.error.code||'')+': '+acc.error.message):null;\nreturn [{json:{\n  me_name:me&&me.name, me_id:me&&me.id,\n  granted_permissions:granted,\n  declined_or_missing:declined,\n  accounts_status:status('Accounts'),\n  accounts_error:accErr,\n  pages_count:(acc&&Array.isArray(acc.data))?acc.data.length:'n/a',\n  page_names:(acc&&acc.data||[]).map(p=>p.name),\n  page_tasks:(acc&&acc.data||[]).map(p=>({name:p.name,tasks:p.tasks})),\n}}];"
+        "jsCode": "// Mode: Run Once for All Items. Names and counts only - no tokens.\nconst body=(n)=>{try{const j=$(n).first().json;return j&&j.body!==undefined?j.body:j;}catch{return null;}};\nconst status=(n)=>{try{return $(n).first().json.statusCode;}catch{return null;}};\nconst me=body('Me'), perm=body('Permissions'), acc=body('Accounts'), pg=body('Page');\nconst granted=(perm&&perm.data||[]).filter(p=>p.status==='granted').map(p=>p.permission);\nconst declined=(perm&&perm.data||[]).filter(p=>p.status!=='granted').map(p=>p.permission+':'+p.status);\nconst accErr=(acc&&acc.error)?(acc.error.type+' '+(acc.error.code||'')+': '+acc.error.message):null;\nreturn [{json:{\n  me_name:me&&me.name, me_id:me&&me.id,\n  granted_permissions:granted,\n  declined_or_missing:declined,\n  accounts_status:status('Accounts'),\n  accounts_error:accErr,\n  pages_count:(acc&&Array.isArray(acc.data))?acc.data.length:'n/a',\n  page_names:(acc&&acc.data||[]).map(p=>p.name),\n  page_tasks:(acc&&acc.data||[]).map(p=>({name:p.name,tasks:p.tasks})),\n  page_status:status('Page'),\n  page_direct:(pg&&pg.error)?('ERR '+pg.error.code+' '+pg.error.message):(pg&&pg.name),\n}}];"
       }
     }
   ],
@@ -167,6 +210,11 @@
           },
           {
             "node": "Accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Page",
             "type": "main",
             "index": 0
           }
@@ -196,6 +244,17 @@
       ]
     },
     "Accounts": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page": {
       "main": [
         [
           {
