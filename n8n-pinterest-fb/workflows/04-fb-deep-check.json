@@ -30,7 +30,7 @@
         "method": "GET",
         "url": "https://graph.facebook.com/v21.0/me",
         "authentication": "genericCredentialType",
-        "genericAuthType": "oAuth2Api",
+        "genericAuthType": "httpHeaderAuth",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -52,9 +52,9 @@
         }
       },
       "credentials": {
-        "oAuth2Api": {
-          "id": "gew3mnOJy0FEybxs",
-          "name": "Facebook OAuth (login)"
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
         }
       },
       "onError": "continueRegularOutput",
@@ -73,7 +73,7 @@
         "method": "GET",
         "url": "https://graph.facebook.com/v21.0/me/permissions",
         "authentication": "genericCredentialType",
-        "genericAuthType": "oAuth2Api",
+        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 30000,
           "response": {
@@ -86,9 +86,9 @@
         }
       },
       "credentials": {
-        "oAuth2Api": {
-          "id": "gew3mnOJy0FEybxs",
-          "name": "Facebook OAuth (login)"
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
         }
       },
       "onError": "continueRegularOutput",
@@ -107,13 +107,13 @@
         "method": "GET",
         "url": "https://graph.facebook.com/v21.0/me/accounts",
         "authentication": "genericCredentialType",
-        "genericAuthType": "oAuth2Api",
+        "genericAuthType": "httpHeaderAuth",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
               "name": "fields",
-              "value": "id,name,access_token,tasks"
+              "value": "id,name,tasks"
             }
           ]
         },
@@ -129,9 +129,9 @@
         }
       },
       "credentials": {
-        "oAuth2Api": {
-          "id": "gew3mnOJy0FEybxs",
-          "name": "Facebook OAuth (login)"
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
         }
       },
       "onError": "continueRegularOutput",
@@ -147,7 +147,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Mode: Run Once for All Items.\nconst body=(n)=>{try{const j=$(n).first().json;return j&&j.body!==undefined?j.body:j;}catch{return 'node did not run';}};\nconst status=(n)=>{try{return $(n).first().json.statusCode;}catch{return null;}};\nconst me=body('Me'), perm=body('Permissions'), acc=body('Accounts');\nconst granted=(perm&&perm.data||[]).filter(p=>p.status==='granted').map(p=>p.permission);\nconst declined=(perm&&perm.data||[]).filter(p=>p.status!=='granted').map(p=>p.permission+':'+p.status);\nreturn [{json:{\n  me_status:status('Me'), me,\n  granted_permissions:granted,\n  declined_or_missing:declined,\n  has_pages_show_list:granted.includes('pages_show_list'),\n  has_pages_manage_posts:granted.includes('pages_manage_posts'),\n  accounts_status:status('Accounts'),\n  pages_returned:(acc&&Array.isArray(acc.data))?acc.data.length:'n/a',\n  pages:(acc&&acc.data||[]).map(p=>({id:p.id,name:p.name,tasks:p.tasks,has_token:Boolean(p.access_token)})),\n  accounts_raw:acc,\n}}];\n"
+        "jsCode": "// Mode: Run Once for All Items. Names and counts only - no tokens.\nconst body=(n)=>{try{const j=$(n).first().json;return j&&j.body!==undefined?j.body:j;}catch{return null;}};\nconst status=(n)=>{try{return $(n).first().json.statusCode;}catch{return null;}};\nconst me=body('Me'), perm=body('Permissions'), acc=body('Accounts');\nconst granted=(perm&&perm.data||[]).filter(p=>p.status==='granted').map(p=>p.permission);\nconst declined=(perm&&perm.data||[]).filter(p=>p.status!=='granted').map(p=>p.permission+':'+p.status);\nconst accErr=(acc&&acc.error)?(acc.error.type+' '+(acc.error.code||'')+': '+acc.error.message):null;\nreturn [{json:{\n  me_name:me&&me.name, me_id:me&&me.id,\n  granted_permissions:granted,\n  declined_or_missing:declined,\n  accounts_status:status('Accounts'),\n  accounts_error:accErr,\n  pages_count:(acc&&Array.isArray(acc.data))?acc.data.length:'n/a',\n  page_names:(acc&&acc.data||[]).map(p=>p.name),\n  page_tasks:(acc&&acc.data||[]).map(p=>({name:p.name,tasks:p.tasks})),\n}}];"
       }
     }
   ],
