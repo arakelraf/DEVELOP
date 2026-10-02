@@ -1,0 +1,216 @@
+{
+  "name": "04 - FB Deep Check",
+  "nodes": [
+    {
+      "id": "wh",
+      "name": "Deep Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fb-deep-check",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "me",
+      "name": "Me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/me",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gew3mnOJy0FEybxs",
+          "name": "Facebook OAuth (login)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "perm",
+      "name": "Permissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/me/permissions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gew3mnOJy0FEybxs",
+          "name": "Facebook OAuth (login)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "acc",
+      "name": "Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/me/accounts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name,access_token,tasks"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gew3mnOJy0FEybxs",
+          "name": "Facebook OAuth (login)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "rep",
+      "name": "Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Mode: Run Once for All Items.\nconst body=(n)=>{try{const j=$(n).first().json;return j&&j.body!==undefined?j.body:j;}catch{return 'node did not run';}};\nconst status=(n)=>{try{return $(n).first().json.statusCode;}catch{return null;}};\nconst me=body('Me'), perm=body('Permissions'), acc=body('Accounts');\nconst granted=(perm&&perm.data||[]).filter(p=>p.status==='granted').map(p=>p.permission);\nconst declined=(perm&&perm.data||[]).filter(p=>p.status!=='granted').map(p=>p.permission+':'+p.status);\nreturn [{json:{\n  me_status:status('Me'), me,\n  granted_permissions:granted,\n  declined_or_missing:declined,\n  has_pages_show_list:granted.includes('pages_show_list'),\n  has_pages_manage_posts:granted.includes('pages_manage_posts'),\n  accounts_status:status('Accounts'),\n  pages_returned:(acc&&Array.isArray(acc.data))?acc.data.length:'n/a',\n  pages:(acc&&acc.data||[]).map(p=>({id:p.id,name:p.name,tasks:p.tasks,has_token:Boolean(p.access_token)})),\n  accounts_raw:acc,\n}}];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Deep Webhook": {
+      "main": [
+        [
+          {
+            "node": "Me",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Permissions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Me": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Permissions": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accounts": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}
