@@ -120,6 +120,37 @@ t('never cuts mid-word leaving a fragment plus ellipsis', () => {
 });
 t('truncate handles null', () => assert.strictEqual(truncate(null, 10), ''));
 
+console.log('\nlink in comment + CTA');
+t('linkInComment keeps the link OUT of the body and returns it separately', () => {
+  const r = buildPostText({ title: 'Nice planner', description: '', etsy_url: URL,
+    linkInComment: true });
+  assert.ok(!r.post_text.includes(URL), 'link leaked into body: ' + r.post_text);
+  assert.strictEqual(r.comment_text, URL);
+});
+t('without linkInComment the link stays in the body (legacy)', () => {
+  const r = buildPostText({ title: 'Nice planner', description: '', etsy_url: URL });
+  assert.ok(r.post_text.endsWith(URL));
+  assert.strictEqual(r.comment_text, '');
+});
+t('CTA footer is placed after the body, before hashtags', () => {
+  const r = buildPostText({ title: 'Planner', description: '', etsy_url: URL,
+    extraHashtags: '#etsy', linkInComment: true, ctaFooter: 'Follow us 👇' });
+  const lines = r.post_text.split('\n\n');
+  assert.strictEqual(lines[0], 'Planner');
+  assert.strictEqual(lines[1], 'Follow us 👇');
+  assert.strictEqual(lines[2], '#etsy');
+});
+t('no CTA footer means no extra block', () => {
+  const r = buildPostText({ title: 'Planner', description: '', etsy_url: URL,
+    linkInComment: true, ctaFooter: '' });
+  assert.ok(!r.post_text.includes('Follow'));
+});
+t('comment_text empty when there is no link even with linkInComment', () => {
+  const r = buildPostText({ title: 'Planner', description: '', etsy_url: '',
+    linkInComment: true });
+  assert.strictEqual(r.comment_text, '');
+});
+
 console.log('\nmodes');
 t('template mode uses the title only', () => {
   const r = buildPostText({ title: 'The Title', description: 'Long description here',

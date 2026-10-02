@@ -21,6 +21,8 @@ const DEFAULTS = {
   MAX_PUBLISH_PER_RUN: '20',
   FB_API_VERSION: 'v21.0',
   AUTH_MODE: 'oauth',
+  LINK_IN_COMMENT: 'true',
+  CTA_FOOTER: '',
 };
 
 const cfg = { ...DEFAULTS };
@@ -42,6 +44,8 @@ cfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);
 cfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);
 // Anything but an explicit "false" keeps the safety on.
 cfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';
+// Link-in-first-comment is on unless explicitly "false".
+cfg._link_in_comment = String(cfg.LINK_IN_COMMENT).trim().toLowerCase() !== 'false';
 // Anything other than an explicit "token" means the OAuth login path.
 cfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'
   ? 'token' : 'oauth';

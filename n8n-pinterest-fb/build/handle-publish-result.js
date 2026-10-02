@@ -4,7 +4,9 @@
 const entry = $('Media Id').first().json;
 const nowIso = new Date().toISOString();
 
-const res = $input.first().json || {};
+// The post result always comes from FB Create Post (the input to this node may
+// be the comment response on the comment branch).
+const res = $('FB Create Post').first().json || {};
 const body = res.body && typeof res.body === 'object' ? res.body : res;
 const httpStatus = res.statusCode ?? null;
 
@@ -13,25 +15,32 @@ const postId = body && body.id ? String(body.id) : '';
 const gErr = body && body.error ? body.error : null;
 
 if (postId && !gErr) {
-  const scheduled = entry.mode === 'scheduled';
+  // Was the first-comment (Etsy link) posted? Best-effort: a failed comment
+  // does not fail the post.
+  let comment_ok = null;
+  try {
+    const c = $('FB Add Comment').first().json || {};
+    const cb = c.body && typeof c.body === 'object' ? c.body : c;
+    comment_ok = Boolean(cb && cb.id);
+  } catch { comment_ok = null; }
+
   return [{ json: {
     row_id: entry.row_id,
     etsy_listing_id: entry.etsy_listing_id,
-    // `scheduled` means Facebook accepted it and will publish at
-    // scheduled_at. It is deliberately distinct from `posted` so the
-    // scheduler still treats the listing as taken, and so a later
-    // verification pass can tell the two apart.
-    status: scheduled ? 'scheduled' : 'posted',
+    status: 'posted',
     fb_post_id: postId,
     fb_media_id: entry.media_fbid || '',
-    error: '',
+    error: comment_ok === false ? 'published, but first-comment link failed' : '',
     attempts: entry.attempts,
     last_attempt_at: nowIso,
-    posted_at: scheduled ? entry.scheduled_at : nowIso,
+    posted_at: nowIso,
     _ok: true,
-    _note: scheduled
-      ? `Accepted by Facebook, will publish at ${entry.scheduled_at}.`
-      : 'Published immediately.',
+    _note: 'Published immediately'
+      + (entry.fb_comment_message
+          ? (comment_ok ? ' with the link in the first comment.'
+             : comment_ok === false ? ' - but the first comment failed to post.'
+             : '.')
+          : '.'),
   } }];
 }
 

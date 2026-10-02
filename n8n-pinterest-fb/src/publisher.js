@@ -47,6 +47,7 @@ function selectForPublish({
   maxPerRun = 20,
   minLeadMs = MIN_LEAD_MS,
   maxAheadMs = MAX_AHEAD_MS,
+  dueGraceMs = 0,
 } = {}) {
   const enabled = new Set(enabledBoards.map(String));
   const itemById = new Map();
@@ -119,7 +120,10 @@ function selectForPublish({
       continue;
     }
 
-    // --- immediate or scheduled? ------------------------------------------
+    // --- due yet? ---------------------------------------------------------
+    // The post is published by n8n at its slot (not handed to Facebook's
+    // scheduler), so the Etsy link can be added as the first comment right
+    // after publishing. A post whose slot has not arrived simply waits.
     const slot = Date.parse(row.scheduled_at || '');
     if (!Number.isFinite(slot)) {
       toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',
@@ -128,17 +132,12 @@ function selectForPublish({
       continue;
     }
 
-    const lead = slot - nowMs;
-    if (lead > maxAheadMs) {
-      // Beyond what Facebook will accept; a later run will pick it up.
+    if (slot > nowMs + dueGraceMs) {
       notYet.push({ row_id: row.id, etsy_listing_id: id,
-        reason: 'beyond_facebook_scheduling_window',
-        scheduled_at: row.scheduled_at,
-        days_ahead: Math.round(lead / 86_400_000) });
+        reason: 'not_due_yet', scheduled_at: row.scheduled_at,
+        minutes_until: Math.ceil((slot - nowMs) / 60_000) });
       continue;
     }
-
-    const mode = lead >= minLeadMs ? 'scheduled' : 'immediate';
 
     if (toPublish.length >= maxPerRun) {
       notYet.push({ row_id: row.id, etsy_listing_id: id,
@@ -153,11 +152,12 @@ function selectForPublish({
       post_text,
       image_url,
       etsy_url: item.etsy_url || `https://www.etsy.com/listing/${id}`,
+      // The link to post as the first comment (Workflow B now builds post_text
+      // without the link in the body when link-in-comment is on).
+      comment_text: item.etsy_url || `https://www.etsy.com/listing/${id}`,
       scheduled_at: row.scheduled_at,
-      mode,
-      // Facebook wants whole seconds since the epoch, and only for a
-      // scheduled post.
-      scheduled_publish_time: mode === 'scheduled' ? Math.floor(slot / 1000) : null,
+      mode: 'immediate',
+      scheduled_publish_time: null,
       attempts: attempts + 1,
       was_retry: status === 'failed',
     });
@@ -170,8 +170,7 @@ function selectForPublish({
     report: {
       actionable_rows: ordered.length,
       publishing: toPublish.length,
-      scheduled: toPublish.filter((p) => p.mode === 'scheduled').length,
-      immediate: toPublish.filter((p) => p.mode === 'immediate').length,
+      immediate: toPublish.length,
       retries: toPublish.filter((p) => p.was_retry).length,
       skipping: toSkip.length,
       deferred: notYet.length,
@@ -204,13 +203,12 @@ function buildGraphCalls(entry, { pageId, apiVersion = 'v21.0' } = {}) {
     // media_fbid is filled in once the upload returns.
     feed: {
       url: `${base}/${pageId}/feed`,
-      body: {
-        message: entry.post_text,
-        published: entry.mode === 'scheduled' ? false : true,
-        ...(entry.mode === 'scheduled'
-          ? { scheduled_publish_time: entry.scheduled_publish_time } : {}),
-      },
+      body: { message: entry.post_text, published: true },
     },
+    // Posted as the first comment right after the feed post is created, so the
+    // Etsy link does not sit in the body (where Facebook throttles reach).
+    // Needs the real post id: `${base}/${post_id}/comments`.
+    comment_message: entry.comment_text || '',
   };
 }
 

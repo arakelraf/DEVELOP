@@ -397,18 +397,49 @@ const nodes = [
         { name: 'message', value: '={{ $json.post_text }}' },
         { name: 'attached_media[0]',
           value: '={{ JSON.stringify({ media_fbid: $json.media_fbid }) }}' },
-        { name: 'published', value: '={{ $json.fb_published ? "true" : "false" }}' },
-        { name: 'scheduled_publish_time',
-          value: '={{ $json.fb_scheduled_publish_time || "" }}' },
+        { name: 'published', value: 'true' },
       ] },
       options: fbResponse,
     },
     onError: 'continueRegularOutput', alwaysOutputData: true,
-    notes: 'Step 2 of 2. published=false + scheduled_publish_time makes '
-         + 'Facebook publish it at the slot.' },
+    notes: 'Step 2 of 2. Publishes the post now (published=true). The Etsy '
+         + 'link is NOT in the body - it goes to the first comment next.' },
+
+  { id: 'if-havecomment', name: 'Has Comment?', type: 'n8n-nodes-base.if',
+    typeVersion: 2.2, position: [4380, 180],
+    parameters: { conditions: { options: opts, combinator: 'and', conditions: [
+      { id: 'c0',
+        leftValue: "={{ $('Media Id').first().json.fb_comment_message }}",
+        rightValue: '', operator: { type: 'string', operation: 'notEmpty', singleValue: true } },
+      { id: 'c1',
+        leftValue: "={{ $('FB Create Post').first().json.body && $('FB Create Post').first().json.body.id ? $('FB Create Post').first().json.body.id : '' }}",
+        rightValue: '', operator: { type: 'string', operation: 'notEmpty', singleValue: true } },
+    ] }, options: {} },
+    notes: 'Comment only when there is a link AND the post was actually '
+         + 'created (so we never comment on a failed post).' },
+
+  { id: 'http-comment', name: 'FB Add Comment', type: 'n8n-nodes-base.httpRequest',
+    typeVersion: 4.2, position: [4600, 120],
+    parameters: {
+      method: 'POST',
+      url: "={{ 'https://graph.facebook.com/'"
+         + " + $('Config').first().json.FB_API_VERSION + '/'"
+         + " + ($('FB Create Post').first().json.body.id) + '/comments' }}",
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Authorization', value: PAGE_TOKEN }] },
+      sendBody: true,
+      bodyParameters: { parameters: [
+        { name: 'message',
+          value: "={{ $('Media Id').first().json.fb_comment_message }}" },
+      ] },
+      options: fbResponse,
+    },
+    onError: 'continueRegularOutput', alwaysOutputData: true,
+    notes: 'Posts the Etsy link as the first comment. Best-effort: a failed '
+         + 'comment does not fail the post.' },
 
   { id: 'cd-result', name: 'Handle Result', type: 'n8n-nodes-base.code', typeVersion: 2,
-    position: [4380, 20], parameters: { jsCode: read('build/handle-publish-result.js') },
+    position: [4820, 20], parameters: { jsCode: read('build/handle-publish-result.js') },
     notes: 'Maps the Graph response (or its error) onto the row update.' },
 
   { id: 'dt-updaterow', name: 'Update Row', type: 'n8n-nodes-base.dataTable',
@@ -472,7 +503,9 @@ const connections = {
   'Download Image': { main: [[m('FB Upload Photo Binary')]] },
   'FB Upload Photo Binary': { main: [[m('Media Id')]] },
   'Media Id': { main: [[m('FB Create Post')]] },
-  'FB Create Post': { main: [[m('Handle Result')]] },
+  'FB Create Post': { main: [[m('Has Comment?')]] },
+  'Has Comment?': { main: [[m('FB Add Comment')], [m('Handle Result')]] },
+  'FB Add Comment': { main: [[m('Handle Result')]] },
   'Handle Result': { main: [[m('Update Row')]] },
   'Update Row': { main: [[m('Loop Publish')]] },
   'Publish Summary': { main: [[m('Write Publish Log')]] },

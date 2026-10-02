@@ -52,6 +52,16 @@ function buildPostText({
   maxChars = 600,
   mode = 'pinterest',
   maxHashtags = 5,
+  // When true, the Etsy link is NOT put in the caption body - it is returned
+  // separately as comment_text, to be posted as the first comment. Facebook
+  // throttles posts with outbound links in the body, so moving the link to a
+  // comment materially improves reach.
+  linkInComment = false,
+  // A short call-to-action appended to the body. Kept generic and brief on
+  // purpose: a fabricated per-post "hook" across 6 posts/day would read as
+  // botty. The pin's own first sentence is already benefit-led, so it serves
+  // as the hook; this only nudges follow + points at the comment link.
+  ctaFooter = '',
 } = {}) {
   const t = String(title || '').trim();
   const d = String(description || '').trim();
@@ -109,12 +119,15 @@ function buildPostText({
   // --- assemble -----------------------------------------------------------
   const parts = [];
   if (cleanBody) parts.push(cleanBody);
+  const cta = String(ctaFooter || '').trim();
+  if (cta) parts.push(cta);
   if (hashtags.length) parts.push(hashtags.join(' '));
-  // The link goes last so Facebook's preview attaches to it.
-  if (etsy_url) parts.push(etsy_url);
+  // Link placement: in the body (legacy) or held back for the first comment.
+  if (etsy_url && !linkInComment) parts.push(etsy_url);
 
   return {
     post_text: parts.join('\n\n'),
+    comment_text: (linkInComment && etsy_url) ? String(etsy_url) : '',
     text_mode: mode,
     hashtags,
     truncated,

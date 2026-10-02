@@ -47,6 +47,8 @@ for (const row of [...plan.toInsert, ...plan.toRequeue]) {
     extraHashtags: cfg.EXTRA_HASHTAGS,
     maxChars: cfg._text_max,
     mode: cfg.TEXT_MODE,
+    linkInComment: cfg._link_in_comment,
+    ctaFooter: cfg.CTA_FOOTER,
   });
 
   out.push({ json: {

@@ -18,6 +18,9 @@ const plan = selectForPublish({
   retryDelayMinutes: cfg._retry_delay_minutes,
   maxAttempts: 2,
   maxPerRun: cfg._max_publish,
+  // Small grace so a post whose slot is a couple of minutes away still goes
+  // out this run rather than waiting a whole cycle.
+  dueGraceMs: 3 * 60 * 1000,
 });
 
 // In live mode the Page id comes from the OAuth login itself, so the config
@@ -70,7 +73,7 @@ for (const p of plan.toPublish) {
     fb_photo_url: calls.photo.url,
     fb_feed_url: calls.feed.url,
     fb_published: calls.feed.body.published,
-    fb_scheduled_publish_time: calls.feed.body.scheduled_publish_time ?? null,
+    fb_comment_message: calls.comment_message || '',
     dry_run: cfg._dry_run,
   } });
 }
