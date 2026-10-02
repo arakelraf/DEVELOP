@@ -1,7 +1,7 @@
 # Privacy Policy — SmartlyDigit
 
 **Effective date:** 2 October 2026
-**Contact:** arakelraf@gmail.com   _(замени на нужный e-mail, если другой)_
+**Contact:** irobotsvc@gmail.com   _(замени на нужный e-mail, если другой)_
 
 This Privacy Policy explains how the SmartlyDigit Facebook application
 ("the App", "we", "us") handles information. The App is used solely to
@@ -57,7 +57,7 @@ in our own automation system, which contain no third-party personal data.
 
 Because the App collects no personal data from users, there is no personal
 data to delete. If you believe we hold any information about you, or you want
-any content concerning you removed, contact us at **arakelraf@gmail.com** and
+any content concerning you removed, contact us at **irobotsvc@gmail.com** and
 we will respond within 30 days.
 
 To revoke the App's access to our Facebook Page at any time, the Page owner can
@@ -77,4 +77,4 @@ always be available at this URL, with the effective date updated at the top.
 ## 9. Contact
 
 Questions about this Privacy Policy:
-**arakelraf@gmail.com**
+**irobotsvc@gmail.com**
