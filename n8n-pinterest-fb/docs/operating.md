@@ -68,11 +68,15 @@ If it is thin or shrinking week on week:
 Nothing breaks when the queue empties. B simply reports that there is
 nothing new to queue, and C has nothing to publish.
 
-## 2. The Facebook login expiring
+## 2. The Facebook token
 
-The login you connected produces a user token that lasts about **60 days**.
-From it, each run derives a Page token. When the user token expires, the Page
-token can no longer be derived and publishing stops.
+Authentication now uses a **System User token** (system user "Johnadmin" in
+the Business, app PagePost, Page SmartlyDigit assigned), stored in the
+`Facebook User Token` credential with `AUTH_MODE=token`. If it was generated
+with expiration **Never**, it does not expire and there is no renewal chore.
+
+If it was generated with a 60-day expiry instead, it will stop working after
+that; the symptom is Graph error code 190 in `errors_log`.
 
 **It fails safely:** nothing is double-posted, nothing is lost. Entries stay
 `queued` and go out once the login is renewed.
@@ -80,10 +84,12 @@ token can no longer be derived and publishing stops.
 **Symptom:** `errors_log` fills with Graph error **code 190**, and the queue
 stops moving.
 
-**Fix (one minute):** n8n → Credentials → *Facebook OAuth (login)* →
-**Connect my account** → approve. That is all; nothing else changes.
+**Fix:** generate a fresh token for the Johnadmin system user
+(business.facebook.com → Business Settings → System Users → Johnadmin →
+Generate new token → app PagePost → the three page permissions → Never),
+and set it in the `Facebook User Token` credential as `Bearer <token>`.
 
-Worth a calendar reminder about two months out.
+With a Never-expiry token this never comes up.
 
 ## 3. Failures
 
