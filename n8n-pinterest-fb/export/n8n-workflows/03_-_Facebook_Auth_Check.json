@@ -1,0 +1,350 @@
+{
+  "id": "hUDLmGnurfQW3iSk",
+  "name": "03 - Facebook Auth Check",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-10-01T08:41:08.890Z",
+  "updatedAt": "2026-10-01T10:48:25.699Z",
+  "isArchived": false,
+  "versionId": "56f51788-83f2-465c-9a79-a5b8f7f31dd9",
+  "versionCounter": 2,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "sn",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ],
+      "parameters": {
+        "width": 480,
+        "height": 230,
+        "color": 4,
+        "content": "## 03 - Facebook Auth Check (read-only)\n\nDoes the login work, and which Page would we post to?\n\nCalls `/me/accounts` with the credential `AUTH_MODE` selects and reports\nwhat came back. **Publishes nothing, writes to no table.**\n\nRun this after connecting the credential, before setting `DRY_RUN=false`."
+      }
+    },
+    {
+      "id": "wh",
+      "name": "Check Webhook",
+      "webhookId": "3542b42c-722e-4cda-841c-7f843ac2f176",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        220,
+        -40
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fb-auth-check",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-config",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        440,
+        -40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Fzx5awBGnmaDaffF"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Flattens the config table into one object so later nodes can read settings\n// as $('Config').first().json.SLOTS instead of searching rows.\n// Defaults are applied for any key missing from the table, so the workflow\n// still runs on a fresh install. Mode: Run Once for All Items.\n\nconst DEFAULTS = {\n  TIMEZONE: 'Europe/Belgrade',\n  SLOTS: '10:00,15:00,20:00',\n  TEXT_MODE: 'pinterest',\n  REPOST_AFTER_DAYS: '60',\n  SCHEDULE_HORIZON_DAYS: '14',\n  MAX_QUEUE_PER_RUN: '60',\n  RETRY_DELAY_MINUTES: '30',\n  EXTRA_HASHTAGS: '',\n  POST_TEXT_MAX_CHARS: '600',\n  FB_PAGE_ID: '',\n  PIN_RESOLVE_MAX_PER_RUN: '10',\n  RESOLVE_THROTTLE_MS: '2000',\n  RESOLVE_MAX_ATTEMPTS: '3',\n  DRY_RUN: 'true',\n  MAX_PUBLISH_PER_RUN: '20',\n  FB_API_VERSION: 'v21.0',\n  AUTH_MODE: 'oauth',\n};\n\nconst cfg = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.key) cfg[String(r.key)] = r.value == null ? '' : String(r.value);\n}\n\n// Typed views, so consumers never re-parse strings.\ncfg._slots = String(cfg.SLOTS).split(',').map((s) => s.trim()).filter(Boolean);\ncfg._repost_after_days = Number(cfg.REPOST_AFTER_DAYS) || 0;\ncfg._resolve_max = Math.max(1, Number(cfg.PIN_RESOLVE_MAX_PER_RUN) || 10);\ncfg._throttle_ms = Math.max(0, Number(cfg.RESOLVE_THROTTLE_MS) || 0);\ncfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);\ncfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);\ncfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);\ncfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);\ncfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);\ncfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);\n// Anything but an explicit \"false\" keeps the safety on.\ncfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';\n// Anything other than an explicit \"token\" means the OAuth login path.\ncfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'\n  ? 'token' : 'oauth';\n\nreturn [{ json: cfg }];\n"
+      }
+    },
+    {
+      "id": "if-mode",
+      "name": "OAuth Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._auth_mode }}",
+              "rightValue": "oauth",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-oauth",
+      "name": "FB List Pages (OAuth)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        1100,
+        -140
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name,access_token"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gew3mnOJy0FEybxs",
+          "name": "Facebook OAuth (login)"
+        }
+      }
+    },
+    {
+      "id": "http-token",
+      "name": "FB List Pages (Token)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        1100,
+        60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name,access_token"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      }
+    },
+    {
+      "id": "cd-pick",
+      "name": "Pick Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Resolves the Page and its access token at run time.\n//\n// The OAuth credential holds a USER token (that is what the login dialog\n// grants). Posting to a Page needs a PAGE token, which /me/accounts derives\n// from it. Doing that on every run means:\n//   - no token is ever copied by hand or stored in the config table\n//   - a Page token derived from a long-lived user token does not expire\n//   - FB_PAGE_ID becomes optional when the account manages one Page\n// Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst mode = cfg._auth_mode; // 'oauth' | 'token'\n\n// The remedy differs per mode, so hints name the thing the user actually has.\nconst reconnect = mode === 'oauth'\n  ? 'Open Credentials -> \"Facebook OAuth (login)\", fill in App ID and App '\n    + 'Secret, then click \"Connect my account\" and approve the Facebook window.'\n  : 'Open Credentials -> \"Facebook User Token\" and paste a valid long-lived '\n    + 'USER token (Graph API Explorer gives you one; see '\n    + 'docs/facebook-page-token.md).';\nconst res = $input.first().json || {};\nconst body = res.body && typeof res.body === 'object' ? res.body : res;\nconst httpStatus = res.statusCode ?? null;\n\n// Two different failures arrive here and must not be conflated:\n//\n//  1. n8n could not even send the request - almost always because the OAuth\n//     credential has never been connected. The node then emits { error: ... }\n//     with no statusCode, and the error object often serializes to {}.\n//  2. Facebook answered with a Graph error, which has type/code/message.\nconst hasGraphError = body && body.error\n  && (body.error.message || body.error.type || body.error.code !== undefined);\n\nif (httpStatus == null && !hasGraphError) {\n  const raw = res.error ?? body?.error;\n  const detail = raw && (raw.message || raw.description || raw.reason);\n  return [{ json: {\n    ok: false,\n    stage: 'request_not_sent',\n    error: 'The call to /me/accounts never reached Facebook'\n      + (detail ? `: ${detail}` : '.'),\n    hint: `AUTH_MODE is \"${mode}\", and its credential is not usable yet. `\n        + reconnect + ' Re-run afterwards.',\n    http_status: null,\n  } }];\n}\n\nif (hasGraphError) {\n  const e = body.error;\n  const parts = [e.type || 'GraphError', e.code !== undefined ? `(${e.code})` : '']\n    .filter(Boolean).join(' ');\n  return [{ json: {\n    ok: false,\n    stage: 'me_accounts_failed',\n    error: `${parts}: ${e.message || 'no message returned'}`\n      + (e.error_user_msg ? ` - ${e.error_user_msg}` : ''),\n    hint: e.code === 190\n      ? 'The token has expired or been revoked. ' + reconnect\n      : 'Check that pages_show_list, pages_manage_posts and '\n        + 'pages_read_engagement were all granted. '\n        + (mode === 'token'\n          ? 'Note: this must be a USER token, not a Page token - /me/accounts '\n            + 'is what turns one into the other.'\n          : ''),\n    http_status: httpStatus,\n  } }];\n}\n\nconst pages = Array.isArray(body && body.data) ? body.data : [];\n\nif (!pages.length) {\n  return [{ json: {\n    ok: false,\n    stage: 'no_pages',\n    error: 'The logged-in account manages no Pages that this app can see.',\n    hint: 'You must be an admin of the Page, and the login must have granted '\n        + 'pages_show_list.',\n    http_status: httpStatus,\n  } }];\n}\n\nconst wanted = String(cfg.FB_PAGE_ID || '').trim();\nlet page = null;\n\nif (wanted) {\n  page = pages.find((p) => String(p.id) === wanted) || null;\n  if (!page) {\n    return [{ json: {\n      ok: false,\n      stage: 'page_id_not_found',\n      error: `FB_PAGE_ID is ${wanted}, but the logged-in account does not `\n        + 'manage a Page with that id.',\n      pages_available: pages.map((p) => ({ id: p.id, name: p.name })),\n      hint: 'Fix FB_PAGE_ID in the config table, or clear it if the account '\n          + 'manages exactly one Page.',\n      http_status: httpStatus,\n    } }];\n  }\n} else if (pages.length === 1) {\n  page = pages[0];\n} else {\n  return [{ json: {\n    ok: false,\n    stage: 'page_id_required',\n    error: `The account manages ${pages.length} Pages, so FB_PAGE_ID must say `\n      + 'which one to post to.',\n    pages_available: pages.map((p) => ({ id: p.id, name: p.name })),\n    http_status: httpStatus,\n  } }];\n}\n\nif (!page.access_token) {\n  return [{ json: {\n    ok: false,\n    stage: 'no_page_token',\n    error: `Page ${page.id} came back without an access_token.`,\n    hint: 'The login did not grant pages_manage_posts for this Page.',\n  } }];\n}\n\nreturn [{ json: {\n  ok: true,\n  page_id: String(page.id),\n  page_name: String(page.name || ''),\n  // Used as a request header by the publish nodes. Never written to a table.\n  page_token: String(page.access_token),\n  page_id_source: wanted ? 'config' : 'only_page_on_account',\n  auth_mode: mode,\n  pages_available: pages.length,\n} }];\n"
+      }
+    },
+    {
+      "id": "cd-report",
+      "name": "Report",
+      "notes": "Reports only that a token arrived, never the token itself.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Reports the outcome WITHOUT ever echoing the Page token.\n// Mode: Run Once for All Items.\n\nconst r = $input.first().json || {};\nconst cfg = $('Config').first().json;\n\nif (!r.ok) {\n  return [{ json: {\n    verdict: 'NOT WORKING',\n    auth_mode: cfg._auth_mode,\n    stage: r.stage, error: r.error, hint: r.hint,\n    pages_available: r.pages_available,\n  } }];\n}\n\nreturn [{ json: {\n  verdict: 'WORKING',\n  auth_mode: cfg._auth_mode,\n  page_id: r.page_id,\n  page_name: r.page_name,\n  page_id_source: r.page_id_source,\n  pages_on_account: r.pages_available,\n  page_token_received: Boolean(r.page_token),\n  next: cfg._dry_run\n    ? 'Auth is fine. Set DRY_RUN=false in config to start publishing.'\n    : 'Auth is fine and DRY_RUN is already off - C will publish on its next run.',\n} }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Check Webhook": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "OAuth Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OAuth Mode?": {
+      "main": [
+        [
+          {
+            "node": "FB List Pages (OAuth)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FB List Pages (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB List Pages (OAuth)": {
+      "main": [
+        [
+          {
+            "node": "Pick Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB List Pages (Token)": {
+      "main": [
+        [
+          {
+            "node": "Pick Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Page": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "timezone": "Europe/Belgrade",
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "hUDLmGnurfQW3iSk",
+      "projectId": "ddGoL4iYjV8UejMn",
+      "project": {
+        "id": "ddGoL4iYjV8UejMn",
+        "name": "Raf Arak <rafaraksrb@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-09-30T15:35:08.876Z",
+        "updatedAt": "2026-09-30T15:37:26.910Z"
+      },
+      "createdAt": "2026-10-01T08:41:08.890Z",
+      "updatedAt": "2026-10-01T08:41:08.890Z"
+    }
+  ],
+  "activeVersion": null
+}

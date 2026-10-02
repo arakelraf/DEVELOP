@@ -1,0 +1,174 @@
+{
+  "id": "3npJ76d4byGKCXqJ",
+  "name": "02 - URL Check",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-30T21:25:05.241Z",
+  "updatedAt": "2026-10-01T10:48:25.128Z",
+  "isArchived": false,
+  "versionId": "3e99c568-4907-42d4-be7c-4db6b2e3fc98",
+  "versionCounter": 3,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "wh",
+      "name": "Probe Webhook",
+      "webhookId": "a36ba88b-5391-460a-a6f9-3a3dfe8d243a",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "url-check",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "prep",
+      "name": "Read Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Accepts {\"url\":\"...\"} or {\"urls\":[...]} plus an optional method.\n// Mode: Run Once for All Items.\n\nconst b = ($input.first().json || {}).body || $input.first().json || {};\nlet urls = b.urls ?? b.url;\nif (typeof urls === 'string') urls = [urls];\nif (!Array.isArray(urls) || !urls.length) {\n  throw new Error('POST {\"url\":\"https://...\",\"method\":\"HEAD\"}');\n}\nconst method = String(b.method || 'HEAD').toUpperCase();\n// preset=image sends image-oriented headers with a Pinterest referer\n// (right for i.pinimg.com, wrong for normal web pages, which some\n// edges answer with 400). preset=browser sends plain browser headers.\nconst preset = String(b.preset || 'image').toLowerCase();\nreturn urls.slice(0, 10).map((u) => ({ json: { url: String(u), method, preset } }));\n"
+      }
+    },
+    {
+      "id": "req",
+      "name": "Check URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        700,
+        0
+      ],
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "={{ $json.preset === 'browser' ? 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' : 'image/avif,image/webp,image/*,*/*;q=0.8' }}"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $json.preset === 'browser' ? '' : 'https://www.pinterest.com/' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "out",
+      "name": "Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Mode: Run Once for All Items.\nconst asked = $('Read Request').all().map((i) => i.json);\nreturn $input.all().map((it, i) => {\n  const j = it.json || {};\n  const h = j.headers || {};\n  return { json: {\n    url: asked[i]?.url || '',\n    method: asked[i]?.method || '',\n    status: j.statusCode ?? null,\n    content_type: h['content-type'] || null,\n    content_length: Number(h['content-length'] || 0) || null,\n  } };\n});\n"
+      }
+    }
+  ],
+  "connections": {
+    "Probe Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Request": {
+      "main": [
+        [
+          {
+            "node": "Check URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check URL": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "timezone": "Europe/Belgrade",
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "3npJ76d4byGKCXqJ",
+      "projectId": "ddGoL4iYjV8UejMn",
+      "project": {
+        "id": "ddGoL4iYjV8UejMn",
+        "name": "Raf Arak <rafaraksrb@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-09-30T15:35:08.876Z",
+        "updatedAt": "2026-09-30T15:37:26.910Z"
+      },
+      "createdAt": "2026-09-30T21:25:05.241Z",
+      "updatedAt": "2026-09-30T21:25:05.241Z"
+    }
+  ],
+  "activeVersion": null
+}

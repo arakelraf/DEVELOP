@@ -1,0 +1,279 @@
+{
+  "id": "PvlehC1HppyNUe9b",
+  "name": "E - Error Handler",
+  "description": null,
+  "active": true,
+  "activeVersionId": "f00fa2fa-38cb-44c5-9a80-86f646eb0e8d",
+  "createdAt": "2026-09-30T22:30:40.517Z",
+  "updatedAt": "2026-10-01T10:48:13.148Z",
+  "isArchived": false,
+  "versionId": "f00fa2fa-38cb-44c5-9a80-86f646eb0e8d",
+  "versionCounter": 1,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "id": "sn-e",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -260
+      ],
+      "parameters": {
+        "width": 460,
+        "height": 240,
+        "color": 2,
+        "content": "## E - Error Handler\n\nSet as the **error workflow** of A, B, C and D.\n\nIt catches outright crashes. Expected failures - a 404 board feed, a\nGraph API refusal, a lost claim - are logged by those workflows with\nmuch more context, so anything appearing here is genuinely unexpected.\n\nRead it with **D -> Boards** or straight from the `errors_log` table."
+      }
+    },
+    {
+      "id": "trg-err",
+      "name": "On Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        -40
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "cd-fmt",
+      "name": "Format Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Turns an n8n Error Trigger payload into one errors_log row.\n//\n// The Error Trigger fires when any workflow that names this one as its error\n// workflow fails outright - a crash, not a handled failure. Handled problems\n// (a dead feed, a Graph API refusal) are logged by the workflows themselves,\n// so anything arriving here is unexpected and worth reading.\n// Mode: Run Once for All Items.\n\nconst e = $input.first().json || {};\nconst wf = e.workflow || {};\nconst ex = e.execution || {};\nconst err = ex.error || e.error || {};\nconst node = err.node || {};\n\nconst lines = [\n  `workflow : ${wf.name || wf.id || 'unknown'}`,\n  `node     : ${node.name || 'unknown'}${node.type ? ` (${node.type})` : ''}`,\n  `message  : ${err.message || 'no message'}`,\n];\nif (err.description) lines.push(`detail   : ${err.description}`);\nif (ex.lastNodeExecuted) lines.push(`last node: ${ex.lastNodeExecuted}`);\nif (ex.id) lines.push(`execution: ${ex.id}`);\nif (ex.url) lines.push(`open     : ${ex.url}`);\nif (err.stack) {\n  // The first frames are the useful part; the rest is n8n internals.\n  lines.push('stack    : ' + String(err.stack).split('\\n').slice(0, 3).join(' | '));\n}\n\nreturn [{ json: {\n  workflow: String(wf.name || 'unknown'),\n  level: 'error',\n  context: `crash in ${node.name || 'unknown node'}`,\n  message: lines.join('\\n'),\n  created_at: new Date().toISOString(),\n} }];\n"
+      }
+    },
+    {
+      "id": "dt-log",
+      "name": "Write Error Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        660,
+        -40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "workflow": "={{ $json.workflow }}",
+            "level": "={{ $json.level }}",
+            "context": "={{ $json.context }}",
+            "message": "={{ $json.message }}",
+            "created_at": "={{ $json.created_at }}"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error": {
+      "main": [
+        [
+          {
+            "node": "Write Error Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "timezone": "Europe/Belgrade",
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "PvlehC1HppyNUe9b",
+      "projectId": "ddGoL4iYjV8UejMn",
+      "project": {
+        "id": "ddGoL4iYjV8UejMn",
+        "name": "Raf Arak <rafaraksrb@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-09-30T15:35:08.876Z",
+        "updatedAt": "2026-09-30T15:37:26.910Z"
+      },
+      "createdAt": "2026-09-30T22:30:40.517Z",
+      "updatedAt": "2026-09-30T22:30:40.517Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "f00fa2fa-38cb-44c5-9a80-86f646eb0e8d",
+    "workflowId": "PvlehC1HppyNUe9b",
+    "nodes": [
+      {
+        "id": "sn-e",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -60,
+          -260
+        ],
+        "parameters": {
+          "width": 460,
+          "height": 240,
+          "color": 2,
+          "content": "## E - Error Handler\n\nSet as the **error workflow** of A, B, C and D.\n\nIt catches outright crashes. Expected failures - a 404 board feed, a\nGraph API refusal, a lost claim - are logged by those workflows with\nmuch more context, so anything appearing here is genuinely unexpected.\n\nRead it with **D -> Boards** or straight from the `errors_log` table."
+        }
+      },
+      {
+        "id": "trg-err",
+        "name": "On Workflow Error",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          220,
+          -40
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "cd-fmt",
+        "name": "Format Error",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          440,
+          -40
+        ],
+        "parameters": {
+          "jsCode": "// Turns an n8n Error Trigger payload into one errors_log row.\n//\n// The Error Trigger fires when any workflow that names this one as its error\n// workflow fails outright - a crash, not a handled failure. Handled problems\n// (a dead feed, a Graph API refusal) are logged by the workflows themselves,\n// so anything arriving here is unexpected and worth reading.\n// Mode: Run Once for All Items.\n\nconst e = $input.first().json || {};\nconst wf = e.workflow || {};\nconst ex = e.execution || {};\nconst err = ex.error || e.error || {};\nconst node = err.node || {};\n\nconst lines = [\n  `workflow : ${wf.name || wf.id || 'unknown'}`,\n  `node     : ${node.name || 'unknown'}${node.type ? ` (${node.type})` : ''}`,\n  `message  : ${err.message || 'no message'}`,\n];\nif (err.description) lines.push(`detail   : ${err.description}`);\nif (ex.lastNodeExecuted) lines.push(`last node: ${ex.lastNodeExecuted}`);\nif (ex.id) lines.push(`execution: ${ex.id}`);\nif (ex.url) lines.push(`open     : ${ex.url}`);\nif (err.stack) {\n  // The first frames are the useful part; the rest is n8n internals.\n  lines.push('stack    : ' + String(err.stack).split('\\n').slice(0, 3).join(' | '));\n}\n\nreturn [{ json: {\n  workflow: String(wf.name || 'unknown'),\n  level: 'error',\n  context: `crash in ${node.name || 'unknown node'}`,\n  message: lines.join('\\n'),\n  created_at: new Date().toISOString(),\n} }];\n"
+        }
+      },
+      {
+        "id": "dt-log",
+        "name": "Write Error Log",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          660,
+          -40
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "matchingColumns": [],
+            "schema": [],
+            "value": {
+              "workflow": "={{ $json.workflow }}",
+              "level": "={{ $json.level }}",
+              "context": "={{ $json.context }}",
+              "message": "={{ $json.message }}",
+              "created_at": "={{ $json.created_at }}"
+            }
+          }
+        }
+      }
+    ],
+    "connections": {
+      "On Workflow Error": {
+        "main": [
+          [
+            {
+              "node": "Format Error",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Error": {
+        "main": [
+          [
+            {
+              "node": "Write Error Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Raf Arak",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-09-30T22:30:40.517Z",
+    "updatedAt": "2026-09-30T22:30:40.517Z",
+    "workflowPublishHistory": [
+      {
+        "id": 78,
+        "workflowId": "PvlehC1HppyNUe9b",
+        "versionId": "f00fa2fa-38cb-44c5-9a80-86f646eb0e8d",
+        "event": "activated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-01T07:33:01.287Z"
+      },
+      {
+        "id": 98,
+        "workflowId": "PvlehC1HppyNUe9b",
+        "versionId": "f00fa2fa-38cb-44c5-9a80-86f646eb0e8d",
+        "event": "deactivated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-01T10:48:13.181Z"
+      },
+      {
+        "id": 99,
+        "workflowId": "PvlehC1HppyNUe9b",
+        "versionId": "f00fa2fa-38cb-44c5-9a80-86f646eb0e8d",
+        "event": "activated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-01T10:48:13.181Z"
+      }
+    ]
+  }
+}

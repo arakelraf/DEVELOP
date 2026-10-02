@@ -1,0 +1,2892 @@
+{
+  "id": "fwvz0DCV8qUgISNJ",
+  "name": "A - Sync Boards",
+  "description": null,
+  "active": true,
+  "activeVersionId": "d4d44b60-f1fa-483d-9f19-e5ae4f56f45d",
+  "createdAt": "2026-09-30T21:21:41.460Z",
+  "updatedAt": "2026-10-01T10:48:09.743Z",
+  "isArchived": false,
+  "versionId": "d4d44b60-f1fa-483d-9f19-e5ae4f56f45d",
+  "versionCounter": 7,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "sn-overview",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        -420
+      ],
+      "parameters": {
+        "width": 520,
+        "height": 400,
+        "color": 3,
+        "content": "## A - Sync Boards\n\nRuns every 6 hours, or on demand. **Collects data only - never posts.**\n\n**Phase 1** read each board's RSS, record every pin in `pins`.\n**Phase 2** pins have no Etsy link in RSS, so fetch the pin page and\nrecover it (capped by `PIN_RESOLVE_MAX_PER_RUN`).\n**Phase 3** collapse resolved pins into `items`, one row per listing.\n\nEvery board is synced **whether enabled or not** - `enabled` controls\npublishing (Workflow B), not collection, so enabling a board later\nalready has a backlog.\n\nA dead board is logged to `errors_log` and the others carry on."
+      }
+    },
+    {
+      "id": "sn-isolation",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        40
+      ],
+      "parameters": {
+        "width": 520,
+        "height": 260,
+        "color": 4,
+        "content": "### Source isolation\n\nThis workflow is the **only** Pinterest-aware part of the system.\nIt writes `items` keyed on `etsy_listing_id`, and `pins` as its own\nprivate cache.\n\nWorkflows B, C and D read `items`/`schedule` and never reference a pin,\na board RSS URL or an i.pinimg.com address. Replacing this workflow with\nthe Etsy API leaves them untouched."
+      }
+    },
+    {
+      "id": "trg-cron",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -40,
+        -200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "trg-manual",
+      "name": "Manual Sync",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -40
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "dt-config",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        200,
+        -120
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Fzx5awBGnmaDaffF"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-config",
+      "name": "Config",
+      "notes": "Flattens the config table and applies defaults for missing keys.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Flattens the config table into one object so later nodes can read settings\n// as $('Config').first().json.SLOTS instead of searching rows.\n// Defaults are applied for any key missing from the table, so the workflow\n// still runs on a fresh install. Mode: Run Once for All Items.\n\nconst DEFAULTS = {\n  TIMEZONE: 'Europe/Belgrade',\n  SLOTS: '10:00,15:00,20:00',\n  TEXT_MODE: 'pinterest',\n  REPOST_AFTER_DAYS: '60',\n  SCHEDULE_HORIZON_DAYS: '14',\n  MAX_QUEUE_PER_RUN: '60',\n  RETRY_DELAY_MINUTES: '30',\n  EXTRA_HASHTAGS: '',\n  POST_TEXT_MAX_CHARS: '600',\n  FB_PAGE_ID: '',\n  PIN_RESOLVE_MAX_PER_RUN: '10',\n  RESOLVE_THROTTLE_MS: '2000',\n  RESOLVE_MAX_ATTEMPTS: '3',\n  DRY_RUN: 'true',\n  MAX_PUBLISH_PER_RUN: '20',\n  FB_API_VERSION: 'v21.0',\n  AUTH_MODE: 'oauth',\n};\n\nconst cfg = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.key) cfg[String(r.key)] = r.value == null ? '' : String(r.value);\n}\n\n// Typed views, so consumers never re-parse strings.\ncfg._slots = String(cfg.SLOTS).split(',').map((s) => s.trim()).filter(Boolean);\ncfg._repost_after_days = Number(cfg.REPOST_AFTER_DAYS) || 0;\ncfg._resolve_max = Math.max(1, Number(cfg.PIN_RESOLVE_MAX_PER_RUN) || 10);\ncfg._throttle_ms = Math.max(0, Number(cfg.RESOLVE_THROTTLE_MS) || 0);\ncfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);\ncfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);\ncfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);\ncfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);\ncfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);\ncfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);\n// Anything but an explicit \"false\" keeps the safety on.\ncfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';\n// Anything other than an explicit \"token\" means the OAuth login path.\ncfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'\n  ? 'token' : 'oauth';\n\nreturn [{ json: cfg }];\n"
+      }
+    },
+    {
+      "id": "dt-boards",
+      "name": "Load Boards",
+      "notes": "All boards, enabled or not - enabled gates publishing, not collection.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        640,
+        -120
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eHP9QfDm4Ay8F0HE"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-boards",
+      "name": "Boards To Sync",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Normalizes the boards table into sync work items.\n//\n// Every board is synced whether or not it is enabled - `enabled` controls\n// PUBLISHING (Workflow B), not collection. We keep accumulating pins for\n// disabled boards so that enabling one later has a backlog ready.\n// Mode: Run Once for All Items.\n\nconst rows = $input.all().map((i) => i.json || {}).filter((r) => r.board_slug || r.rss_url);\nconst now = new Date().toISOString();\n\nconst valid = [];\nconst bad = [];\n\nfor (const r of rows) {\n  const slug = String(r.board_slug || '').trim();\n  const url = String(r.rss_url || '').trim();\n  if (!slug || !/^https?:\\/\\//i.test(url)) {\n    bad.push({ slug, url });\n    continue;\n  }\n  valid.push({\n    row_id: r.id,\n    board_slug: slug,\n    name: String(r.name || slug),\n    rss_url: url,\n    enabled: r.enabled === true,\n    priority: Number(r.priority) || 0,\n  });\n}\n\nif (!valid.length) {\n  return [{ json: {\n    _kind: 'log',\n    workflow: 'A - Sync Boards',\n    level: 'warn',\n    context: 'load_boards',\n    message: rows.length\n      ? `No usable boards. ${bad.length} row(s) lack a slug or a valid rss_url.`\n      : 'The boards table is empty. Add a board via Workflow D or the table UI.',\n    created_at: now,\n  } }];\n}\n\n// Highest priority first, so a run that hits a cap does the important boards.\nvalid.sort((a, b) => b.priority - a.priority || a.board_slug.localeCompare(b.board_slug));\nreturn valid.map((b) => ({ json: { _kind: 'board', ...b } }));\n"
+      }
+    },
+    {
+      "id": "if-boards",
+      "name": "Have Boards?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "board",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "loop-boards",
+      "name": "Loop Boards",
+      "notes": "One board at a time, so a feed error is attributable to its board.",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1300,
+        -220
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-current",
+      "name": "Current Board",
+      "notes": "Stable single-item reference for the rest of the iteration.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Passthrough for the board currently being iterated.\n//\n// Exists so downstream nodes can reference ONE stable, single-item\n// node instead of $('Loop Boards'), which does not resolve from\n// branches that sit behind a data-table write (item lineage is lost\n// there, and .first() returns undefined).\n// Mode: Run Once for All Items.\n\nconst b = $input.first().json;\nreturn [{ json: { ...b, last_synced_at: new Date().toISOString() } }];\n"
+      }
+    },
+    {
+      "id": "rss",
+      "name": "Read Board RSS",
+      "notes": "Continues on error: a renamed or secret board is logged, not fatal.",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        1540,
+        -120
+      ],
+      "parameters": {
+        "url": "={{ $('Current Board').first().json.rss_url }}",
+        "options": {
+          "ignoreSSL": false
+        }
+      }
+    },
+    {
+      "id": "cd-parse",
+      "name": "Parse Pins To Rows",
+      "notes": "RSS items -> pins rows + log rows. Only Pinterest-aware code here.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Pinterest pin -> Etsy listing extraction.\n *\n * This is the ONLY place that knows Pinterest exists. It is kept as a plain\n * module so it can be unit-tested outside n8n; the same body is pasted into\n * Workflow A's \"Parse Pins\" Code node.\n *\n * Contract (the isolation boundary the rest of the system depends on):\n *   input : a raw RSS item object from the RSS Feed Read node\n *   output: { ok: true, etsy_listing_id, etsy_url, title, description,\n *             image_url, image_candidates, pin_url }\n *        or { ok: false, reason, pin_url }\n *\n * Workflows B/C/D never see a field from this file other than the ones above,\n * and key off etsy_listing_id. Swapping in the Etsy API later means replacing\n * this file and nothing else.\n */\n\n// ---------------------------------------------------------------- HTML text\n\nconst ENTITIES = {\n  amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n  hellip: '…', mdash: '—', ndash: '–', rsquo: '’',\n  lsquo: '‘', ldquo: '“', rdquo: '”', middot: '·',\n  eacute: 'é', trade: '™', reg: '®', copy: '©',\n};\n\nfunction decodeEntities(s) {\n  return String(s || '')\n    .replace(/&#x([0-9a-f]+);/gi, (_, h) => safeCodePoint(parseInt(h, 16)))\n    .replace(/&#(\\d+);/g, (_, d) => safeCodePoint(parseInt(d, 10)))\n    .replace(/&([a-z]+);/gi, (m, name) => {\n      const k = name.toLowerCase();\n      return Object.prototype.hasOwnProperty.call(ENTITIES, k) ? ENTITIES[k] : m;\n    });\n}\n\nfunction safeCodePoint(n) {\n  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';\n  try { return String.fromCodePoint(n); } catch { return ''; }\n}\n\n// Pinterest boilerplate that adds nothing to a Facebook caption.\nconst BOILERPLATE = [\n  /\\b(?:this|these)\\s+pins?\\s+(?:was|were)\\s+discovered\\s+by[^.]*\\.?/i,\n  /\\bdiscover\\s+\\(and\\s+save!?\\)\\s+your\\s+own\\s+pins\\s+on\\s+pinterest\\.?/i,\n  /\\bfind\\s+this\\s+pin\\s+and\\s+more\\s+on\\s+[^.|]*\\s+by\\s+[^.|]*\\.?/i,\n  /\\bsaved?\\s+(from|to)\\s+pinterest\\.?/i,\n  /\\bmore\\s+ideas\\s+about\\s+[^.]*\\./i,\n  /\\bclick\\s+(the\\s+)?link\\s+(in\\s+bio|to\\s+(shop|buy|view))\\b[^.]*\\.?/i,\n  /\\bvisit\\s+(my|our)\\s+(etsy\\s+)?shop\\s+for\\s+more\\b[^.]*\\.?/i,\n];\n\n/** Strip tags, decode entities, drop boilerplate, collapse whitespace. */\nfunction cleanText(html) {\n  let s = String(html == null ? '' : html);\n  s = s.replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n       .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ');\n  // Keep paragraph/line structure before tags are removed.\n  s = s.replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/p>/gi, '\\n\\n');\n  s = s.replace(/<[^>]*>/g, ' ');\n  s = decodeEntities(s);\n  // A bare Pinterest/Etsy URL left in the body is noise; the link is appended\n  // deliberately at the end of the caption by Workflow B.\n  s = s.replace(/https?:\\/\\/(www\\.)?(pinterest\\.[a-z.]+|pin\\.it|etsy\\.com)\\/\\S*/gi, ' ');\n  for (const re of BOILERPLATE) s = s.replace(re, ' ');\n  s = s.replace(/[ \\t ]+/g, ' ')\n       .replace(/ ?\\n ?/g, '\\n')\n       .replace(/\\n{3,}/g, '\\n\\n')\n       .trim();\n  return s;\n}\n\n// ---------------------------------------------------------------- Etsy link\n\n/**\n * Etsy listing URLs we accept:\n *   https://www.etsy.com/listing/1234567890/slug?utm_source=...\n *   https://etsy.com/listing/1234567890\n *   https://www.etsy.com/il-en/listing/1234567890/slug   (locale prefix)\n *   https://www.etsy.com/shop/X/listing/1234567890/slug\n * Rejected: anything without a /listing/{digits} segment.\n */\nconst ETSY_LISTING_RE = /https?:\\/\\/(?:[a-z0-9-]+\\.)?etsy\\.com\\/(?:[a-z]{2}-[a-z]{2}\\/)?(?:[^\\s\"'<>?#]*\\/)?listing\\/(\\d{6,15})(?:[\\/?#][^\\s\"'<>]*)?/i;\n\n/** Pinterest wraps outbound links in a redirector; unwrap before matching. */\nfunction unwrapRedirect(url) {\n  const s = String(url || '');\n  const m = s.match(/[?&](?:url|u|redirect|target|dest)=([^&]+)/i);\n  if (!m) return s;\n  try {\n    const inner = decodeURIComponent(m[1]);\n    if (/^https?:\\/\\//i.test(inner)) return inner;\n  } catch { /* malformed escape - fall through */ }\n  return s;\n}\n\n/** Collect every plausible URL from an RSS item, in order of trustworthiness. */\nfunction linkCandidates(item) {\n  const out = [];\n  const push = (v) => { if (v && typeof v === 'string') out.push(v); };\n\n  push(item.link);\n  push(item.guid && (item.guid._ || item.guid.value || item.guid));\n  push(item.id);\n  // Some feeds put the outbound URL in an enclosure or a namespaced field.\n  if (item.enclosure && item.enclosure.url) push(item.enclosure.url);\n  push(item['pinterest:link']);\n\n  const html = [\n    item.description,\n    item.content,\n    item['content:encoded'],\n    item.contentSnippet,\n    item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Every href/src in the HTML, plus any bare URL in the text.\n  for (const m of html.matchAll(/(?:href|src)\\s*=\\s*[\"']([^\"']+)[\"']/gi)) push(m[1]);\n  for (const m of html.matchAll(/https?:\\/\\/[^\\s\"'<>)]+/gi)) push(m[0]);\n\n  return out.map(unwrapRedirect);\n}\n\n/** First Etsy listing link found, normalized. null when the pin has none. */\nfunction extractEtsy(item) {\n  for (const cand of linkCandidates(item)) {\n    const m = String(cand).match(ETSY_LISTING_RE);\n    if (m) {\n      const id = m[1];\n      return { etsy_listing_id: id, etsy_url: `https://www.etsy.com/listing/${id}` };\n    }\n  }\n  return null;\n}\n\n// ------------------------------------------------------------------- images\n\n/**\n * Pinterest serves the same image at several sizes under a size segment:\n *   https://i.pinimg.com/236x/ab/cd/ef/abcdef123.jpg\n *   https://i.pinimg.com/originals/ab/cd/ef/abcdef123.jpg\n * /originals/ is the largest but does not always exist (and can carry a\n * different extension), so return an ordered candidate list. Workflow A\n * HEAD-checks them and stores the first that actually loads.\n */\nconst PINIMG_SIZE_RE = /^(https?:\\/\\/i\\.pinimg\\.com\\/)([^/]+)(\\/.+)$/i;\nconst SIZE_PREFERENCE = ['originals', '1200x', '736x', '564x', '474x', '236x'];\n\nfunction imageCandidates(url) {\n  const s = String(url || '').trim();\n  if (!s) return [];\n  const m = s.match(PINIMG_SIZE_RE);\n  if (!m) return [s];\n  const [, host, currentSize, path] = m;\n  const out = [];\n  for (const size of SIZE_PREFERENCE) {\n    out.push(`${host}${size}${path}`);\n    // /originals/ frequently stores a .png or .webp where the thumb was .jpg.\n    if (size === 'originals') {\n      const swapped = path.replace(/\\.(jpe?g)$/i, '.png');\n      if (swapped !== path) out.push(`${host}${size}${swapped}`);\n    }\n  }\n  if (!SIZE_PREFERENCE.includes(currentSize.toLowerCase())) out.push(s);\n  // De-duplicate, preserve order, and always keep the original as last resort.\n  const seen = new Set();\n  const uniq = out.filter((u) => !seen.has(u) && seen.add(u));\n  if (!uniq.includes(s)) uniq.push(s);\n  return uniq;\n}\n\n/** Pull the pin image out of an RSS item. */\nfunction extractImage(item) {\n  const html = [\n    item.description, item.content, item['content:encoded'], item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Prefer a real media field when the feed provides one.\n  const media = item['media:content'] || item['media:thumbnail'];\n  const mediaUrl = media && (media.url || (media.$ && media.$.url));\n  if (mediaUrl) return String(mediaUrl);\n  if (item.enclosure && item.enclosure.url && /^image\\//i.test(item.enclosure.type || 'image/')) {\n    return String(item.enclosure.url);\n  }\n\n  const img = html.match(/<img[^>]+src\\s*=\\s*[\"']([^\"']+)[\"']/i);\n  if (img) return img[1];\n  const bare = html.match(/https?:\\/\\/i\\.pinimg\\.com\\/[^\\s\"'<>)]+\\.(?:jpe?g|png|webp)/i);\n  return bare ? bare[0] : '';\n}\n\n/** The pin's own Pinterest URL, for the pin_urls audit trail. */\nfunction extractPinUrl(item) {\n  const cands = [\n    item.guid && (item.guid._ || item.guid.value || item.guid),\n    item.link,\n    item.id,\n  ].filter((v) => typeof v === 'string');\n  for (const c of cands) {\n    const m = c.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n    if (m) return m[0];\n  }\n  const html = [item.description, item.content, item['content:encoded']]\n    .filter(Boolean).join(' ');\n  const m = html.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n  return m ? m[0] : '';\n}\n\n// ------------------------------------------------------------------- public\n\nfunction parsePin(item, opts = {}) {\n  const pin_url = extractPinUrl(item);\n  const etsy = extractEtsy(item);\n  if (!etsy) {\n    return { ok: false, reason: 'no_etsy_link', pin_url,\n             title: cleanText(item.title).slice(0, 120) };\n  }\n  const rawImage = extractImage(item);\n  const cands = imageCandidates(rawImage);\n  const title = cleanText(item.title);\n  const description = cleanText(\n    item.description || item.content || item['content:encoded'] || item.summary || ''\n  );\n  if (!cands.length) {\n    return { ok: false, reason: 'no_image', pin_url, title,\n             etsy_listing_id: etsy.etsy_listing_id };\n  }\n  return {\n    ok: true,\n    etsy_listing_id: etsy.etsy_listing_id,\n    etsy_url: etsy.etsy_url,\n    title,\n    description,\n    image_url: cands[0],          // provisional; HEAD-verified downstream\n    image_candidates: cands,\n    pin_url,\n    board_slug: opts.board_slug || '',\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Turns one board's RSS items into `pins` rows plus log rows.\n//\n// Note: a pin row is written even when the feed carries no Etsy link, because\n// Pinterest's RSS never does - the link is recovered from the pin page in\n// phase 2. resolve_status='new' marks a pin as awaiting that step.\n// Mode: Run Once for All Items.\n\nconst board = $('Current Board').first().json;\nconst board_slug = board.board_slug;\nconst rss_url = board.rss_url;\nconst now = new Date().toISOString();\n\nconst rows = [];\nconst rejected = {};\nlet total = 0;\nlet feedError = null;\n\nfor (const item of $input.all()) {\n  const raw = item.json || {};\n\n  // The RSS node continues on error so one dead board cannot stop the rest;\n  // a failed fetch arrives as an item carrying .error.\n  if (raw.error) {\n    feedError = String(raw.error.message || raw.error);\n    break;\n  }\n  // alwaysOutputData can emit one empty placeholder item.\n  if (!raw.title && !raw.link && !raw.guid && !raw.content) continue;\n\n  total++;\n  const r = parsePin(raw, { board_slug });\n  const pin_url = r.pin_url || extractPinUrl(raw);\n  const pin_id = (String(pin_url).match(/\\/pin\\/(\\d+)/) || [])[1] || '';\n\n  if (!pin_id) { rejected.no_pin_id = (rejected.no_pin_id || 0) + 1; continue; }\n\n  const cands = r.ok && r.image_candidates.length\n    ? r.image_candidates\n    : imageCandidates(extractImage(raw));\n  if (!cands.length) { rejected.no_image = (rejected.no_image || 0) + 1; continue; }\n\n  rows.push({ json: {\n    _kind: 'pin',\n    pin_id,\n    pin_url,\n    board_slug,\n    title: r.ok ? r.title : cleanText(raw.title),\n    description: r.ok ? r.description\n      : cleanText(raw.description || raw.content || raw['content:encoded'] || ''),\n    image_url: cands[0],\n    image_candidates: JSON.stringify(cands),\n    // A feed that *does* carry the link skips the resolve step entirely.\n    etsy_listing_id: r.ok ? r.etsy_listing_id : '',\n    resolve_status: r.ok ? 'ok' : 'new',\n    resolve_error: '',\n    resolve_attempts: 0,\n    first_seen_at: now,\n    resolved_at: r.ok ? now : null,\n  } });\n}\n\nif (feedError) {\n  return [{ json: {\n    _kind: 'log',\n    workflow: 'A - Sync Boards',\n    level: 'error',\n    context: `board=${board_slug} url=${rss_url}`,\n    message: `Feed fetch failed: ${feedError}`,\n    created_at: now,\n  } }];\n}\n\nconst summary = {\n  _kind: 'log',\n  workflow: 'A - Sync Boards',\n  level: rows.length ? 'info' : 'warn',\n  context: `board=${board_slug}`,\n  message: `feed_items=${total} usable_pins=${rows.length}`\n    + (Object.keys(rejected).length ? ` rejected=${JSON.stringify(rejected)}` : ''),\n  created_at: now,\n};\n\nreturn rows.length ? [...rows, { json: summary }] : [{ json: summary }];\n"
+      }
+    },
+    {
+      "id": "if-kind",
+      "name": "Pin Or Log?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "pin",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-newpins",
+      "name": "New Pins Only",
+      "notes": "Passes through only pins we have never seen, so an already-resolved pin is never reset to status=new. No alwaysOutputData: zero new pins must mean zero inserts, not one blank row.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        -220
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "rowNotExists",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "HBshV0j15En0ZX6S"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "pin_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.pin_id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dt-insertpin",
+      "name": "Insert Pin",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        -220
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "HBshV0j15En0ZX6S"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "pin_id": "={{ $json.pin_id }}",
+            "pin_url": "={{ $json.pin_url }}",
+            "board_slug": "={{ $json.board_slug }}",
+            "title": "={{ $json.title }}",
+            "description": "={{ $json.description }}",
+            "image_url": "={{ $json.image_url }}",
+            "image_candidates": "={{ $json.image_candidates }}",
+            "etsy_listing_id": "={{ $json.etsy_listing_id }}",
+            "resolve_status": "={{ $json.resolve_status }}",
+            "resolve_error": "={{ $json.resolve_error }}",
+            "resolve_attempts": "={{ $json.resolve_attempts }}",
+            "first_seen_at": "={{ $json.first_seen_at }}",
+            "resolved_at": "={{ $json.resolved_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "optimizeBulk": true
+        }
+      }
+    },
+    {
+      "id": "dt-noboards",
+      "name": "Write No Boards Log",
+      "notes": "Only reached when the boards table has nothing usable. Phase 2 still runs, since pins may be waiting from an earlier sync.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1300,
+        40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "={{ $json.workflow }}",
+            "level": "={{ $json.level }}",
+            "context": "={{ $json.context }}",
+            "message": "={{ $json.message }}",
+            "created_at": "={{ $json.created_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    },
+    {
+      "id": "dt-boardlog",
+      "name": "Write Board Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        2200,
+        20
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "={{ $json.workflow }}",
+            "level": "={{ $json.level }}",
+            "context": "={{ $json.context }}",
+            "message": "={{ $json.message }}",
+            "created_at": "={{ $json.created_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    },
+    {
+      "id": "dt-touch",
+      "name": "Touch Board",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        1760,
+        -320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eHP9QfDm4Ay8F0HE"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "board_slug",
+              "condition": "eq",
+              "keyValue": "={{ $json.board_slug }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_synced_at": "={{ $json.last_synced_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sn-phase2",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        240
+      ],
+      "parameters": {
+        "width": 500,
+        "height": 240,
+        "color": 5,
+        "content": "### Phase 2 - recover the Etsy link\n\nPinterest RSS carries no outbound link, so it is read from the pin page,\nwhere Pinterest embeds it in hydration JSON.\n\nEach page is ~1MB, so only `resolve_status=new` pins are fetched, capped\nby `PIN_RESOLVE_MAX_PER_RUN` and spaced by `RESOLVE_THROTTLE_MS`.\n`ok`, `not_etsy` and `failed` are terminal - never re-fetched."
+      }
+    },
+    {
+      "id": "dt-pending",
+      "name": "Load Pending Pins",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1540,
+        380
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "HBshV0j15En0ZX6S"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "resolve_status",
+              "condition": "eq",
+              "keyValue": "new"
+            }
+          ]
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-pending",
+      "name": "Pins To Resolve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        380
+      ],
+      "parameters": {
+        "jsCode": "// Phase 2 gate: decide which pins get their page fetched this run.\n//\n// Each pin page is ~1MB, so this is the throttle that keeps a sync from\n// turning into a scrape. Only pins with resolve_status='new' are candidates;\n// 'ok', 'not_etsy' and 'failed' are terminal. Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst rows = $input.all()\n  .map((i) => i.json || {})\n  .filter((r) => r.pin_id && r.resolve_status === 'new');\n\nif (!rows.length) {\n  return [{ json: { _kind: 'none',\n    message: 'No pins awaiting resolution - every known pin is already '\n           + 'resolved, parked as not_etsy, or failed past its retry limit.' } }];\n}\n\n// Oldest first, so a backlog drains in the order pins were discovered.\nrows.sort((a, b) => String(a.first_seen_at || '').localeCompare(String(b.first_seen_at || '')));\n\nreturn rows.slice(0, cfg._resolve_max).map((r) => ({ json: {\n  pin_id: String(r.pin_id),\n  pin_url: String(r.pin_url || ''),\n  board_slug: String(r.board_slug || ''),\n  title: String(r.title || ''),\n  description: String(r.description || ''),\n  image_url: String(r.image_url || ''),\n  image_candidates: r.image_candidates || '[]',\n  resolve_attempts: Number(r.resolve_attempts) || 0,\n  resolved_at: r.resolved_at || null,\n  etsy_listing_id: String(r.etsy_listing_id || ''),\n} }));\n"
+      }
+    },
+    {
+      "id": "if-resolve",
+      "name": "Anything To Resolve?",
+      "notes": "TRUE branch means nothing to do - skip straight to the summary.",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        380
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "none",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-pin",
+      "name": "Fetch Pin Page",
+      "notes": "Browser-like headers; neverError so a 403/429 is recorded, not fatal.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2200,
+        480
+      ],
+      "parameters": {
+        "url": "={{ $json.pin_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 25000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": "={{ $('Config').first().json._throttle_ms }}"
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cd-resolve",
+      "name": "Resolve Pin Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        480
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Pinterest pin -> Etsy listing extraction.\n *\n * This is the ONLY place that knows Pinterest exists. It is kept as a plain\n * module so it can be unit-tested outside n8n; the same body is pasted into\n * Workflow A's \"Parse Pins\" Code node.\n *\n * Contract (the isolation boundary the rest of the system depends on):\n *   input : a raw RSS item object from the RSS Feed Read node\n *   output: { ok: true, etsy_listing_id, etsy_url, title, description,\n *             image_url, image_candidates, pin_url }\n *        or { ok: false, reason, pin_url }\n *\n * Workflows B/C/D never see a field from this file other than the ones above,\n * and key off etsy_listing_id. Swapping in the Etsy API later means replacing\n * this file and nothing else.\n */\n\n// ---------------------------------------------------------------- HTML text\n\nconst ENTITIES = {\n  amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n  hellip: '…', mdash: '—', ndash: '–', rsquo: '’',\n  lsquo: '‘', ldquo: '“', rdquo: '”', middot: '·',\n  eacute: 'é', trade: '™', reg: '®', copy: '©',\n};\n\nfunction decodeEntities(s) {\n  return String(s || '')\n    .replace(/&#x([0-9a-f]+);/gi, (_, h) => safeCodePoint(parseInt(h, 16)))\n    .replace(/&#(\\d+);/g, (_, d) => safeCodePoint(parseInt(d, 10)))\n    .replace(/&([a-z]+);/gi, (m, name) => {\n      const k = name.toLowerCase();\n      return Object.prototype.hasOwnProperty.call(ENTITIES, k) ? ENTITIES[k] : m;\n    });\n}\n\nfunction safeCodePoint(n) {\n  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';\n  try { return String.fromCodePoint(n); } catch { return ''; }\n}\n\n// Pinterest boilerplate that adds nothing to a Facebook caption.\nconst BOILERPLATE = [\n  /\\b(?:this|these)\\s+pins?\\s+(?:was|were)\\s+discovered\\s+by[^.]*\\.?/i,\n  /\\bdiscover\\s+\\(and\\s+save!?\\)\\s+your\\s+own\\s+pins\\s+on\\s+pinterest\\.?/i,\n  /\\bfind\\s+this\\s+pin\\s+and\\s+more\\s+on\\s+[^.|]*\\s+by\\s+[^.|]*\\.?/i,\n  /\\bsaved?\\s+(from|to)\\s+pinterest\\.?/i,\n  /\\bmore\\s+ideas\\s+about\\s+[^.]*\\./i,\n  /\\bclick\\s+(the\\s+)?link\\s+(in\\s+bio|to\\s+(shop|buy|view))\\b[^.]*\\.?/i,\n  /\\bvisit\\s+(my|our)\\s+(etsy\\s+)?shop\\s+for\\s+more\\b[^.]*\\.?/i,\n];\n\n/** Strip tags, decode entities, drop boilerplate, collapse whitespace. */\nfunction cleanText(html) {\n  let s = String(html == null ? '' : html);\n  s = s.replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n       .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ');\n  // Keep paragraph/line structure before tags are removed.\n  s = s.replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/p>/gi, '\\n\\n');\n  s = s.replace(/<[^>]*>/g, ' ');\n  s = decodeEntities(s);\n  // A bare Pinterest/Etsy URL left in the body is noise; the link is appended\n  // deliberately at the end of the caption by Workflow B.\n  s = s.replace(/https?:\\/\\/(www\\.)?(pinterest\\.[a-z.]+|pin\\.it|etsy\\.com)\\/\\S*/gi, ' ');\n  for (const re of BOILERPLATE) s = s.replace(re, ' ');\n  s = s.replace(/[ \\t ]+/g, ' ')\n       .replace(/ ?\\n ?/g, '\\n')\n       .replace(/\\n{3,}/g, '\\n\\n')\n       .trim();\n  return s;\n}\n\n// ---------------------------------------------------------------- Etsy link\n\n/**\n * Etsy listing URLs we accept:\n *   https://www.etsy.com/listing/1234567890/slug?utm_source=...\n *   https://etsy.com/listing/1234567890\n *   https://www.etsy.com/il-en/listing/1234567890/slug   (locale prefix)\n *   https://www.etsy.com/shop/X/listing/1234567890/slug\n * Rejected: anything without a /listing/{digits} segment.\n */\nconst ETSY_LISTING_RE = /https?:\\/\\/(?:[a-z0-9-]+\\.)?etsy\\.com\\/(?:[a-z]{2}-[a-z]{2}\\/)?(?:[^\\s\"'<>?#]*\\/)?listing\\/(\\d{6,15})(?:[\\/?#][^\\s\"'<>]*)?/i;\n\n/** Pinterest wraps outbound links in a redirector; unwrap before matching. */\nfunction unwrapRedirect(url) {\n  const s = String(url || '');\n  const m = s.match(/[?&](?:url|u|redirect|target|dest)=([^&]+)/i);\n  if (!m) return s;\n  try {\n    const inner = decodeURIComponent(m[1]);\n    if (/^https?:\\/\\//i.test(inner)) return inner;\n  } catch { /* malformed escape - fall through */ }\n  return s;\n}\n\n/** Collect every plausible URL from an RSS item, in order of trustworthiness. */\nfunction linkCandidates(item) {\n  const out = [];\n  const push = (v) => { if (v && typeof v === 'string') out.push(v); };\n\n  push(item.link);\n  push(item.guid && (item.guid._ || item.guid.value || item.guid));\n  push(item.id);\n  // Some feeds put the outbound URL in an enclosure or a namespaced field.\n  if (item.enclosure && item.enclosure.url) push(item.enclosure.url);\n  push(item['pinterest:link']);\n\n  const html = [\n    item.description,\n    item.content,\n    item['content:encoded'],\n    item.contentSnippet,\n    item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Every href/src in the HTML, plus any bare URL in the text.\n  for (const m of html.matchAll(/(?:href|src)\\s*=\\s*[\"']([^\"']+)[\"']/gi)) push(m[1]);\n  for (const m of html.matchAll(/https?:\\/\\/[^\\s\"'<>)]+/gi)) push(m[0]);\n\n  return out.map(unwrapRedirect);\n}\n\n/** First Etsy listing link found, normalized. null when the pin has none. */\nfunction extractEtsy(item) {\n  for (const cand of linkCandidates(item)) {\n    const m = String(cand).match(ETSY_LISTING_RE);\n    if (m) {\n      const id = m[1];\n      return { etsy_listing_id: id, etsy_url: `https://www.etsy.com/listing/${id}` };\n    }\n  }\n  return null;\n}\n\n// ------------------------------------------------------------------- images\n\n/**\n * Pinterest serves the same image at several sizes under a size segment:\n *   https://i.pinimg.com/236x/ab/cd/ef/abcdef123.jpg\n *   https://i.pinimg.com/originals/ab/cd/ef/abcdef123.jpg\n * /originals/ is the largest but does not always exist (and can carry a\n * different extension), so return an ordered candidate list. Workflow A\n * HEAD-checks them and stores the first that actually loads.\n */\nconst PINIMG_SIZE_RE = /^(https?:\\/\\/i\\.pinimg\\.com\\/)([^/]+)(\\/.+)$/i;\nconst SIZE_PREFERENCE = ['originals', '1200x', '736x', '564x', '474x', '236x'];\n\nfunction imageCandidates(url) {\n  const s = String(url || '').trim();\n  if (!s) return [];\n  const m = s.match(PINIMG_SIZE_RE);\n  if (!m) return [s];\n  const [, host, currentSize, path] = m;\n  const out = [];\n  for (const size of SIZE_PREFERENCE) {\n    out.push(`${host}${size}${path}`);\n    // /originals/ frequently stores a .png or .webp where the thumb was .jpg.\n    if (size === 'originals') {\n      const swapped = path.replace(/\\.(jpe?g)$/i, '.png');\n      if (swapped !== path) out.push(`${host}${size}${swapped}`);\n    }\n  }\n  if (!SIZE_PREFERENCE.includes(currentSize.toLowerCase())) out.push(s);\n  // De-duplicate, preserve order, and always keep the original as last resort.\n  const seen = new Set();\n  const uniq = out.filter((u) => !seen.has(u) && seen.add(u));\n  if (!uniq.includes(s)) uniq.push(s);\n  return uniq;\n}\n\n/** Pull the pin image out of an RSS item. */\nfunction extractImage(item) {\n  const html = [\n    item.description, item.content, item['content:encoded'], item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Prefer a real media field when the feed provides one.\n  const media = item['media:content'] || item['media:thumbnail'];\n  const mediaUrl = media && (media.url || (media.$ && media.$.url));\n  if (mediaUrl) return String(mediaUrl);\n  if (item.enclosure && item.enclosure.url && /^image\\//i.test(item.enclosure.type || 'image/')) {\n    return String(item.enclosure.url);\n  }\n\n  const img = html.match(/<img[^>]+src\\s*=\\s*[\"']([^\"']+)[\"']/i);\n  if (img) return img[1];\n  const bare = html.match(/https?:\\/\\/i\\.pinimg\\.com\\/[^\\s\"'<>)]+\\.(?:jpe?g|png|webp)/i);\n  return bare ? bare[0] : '';\n}\n\n/** The pin's own Pinterest URL, for the pin_urls audit trail. */\nfunction extractPinUrl(item) {\n  const cands = [\n    item.guid && (item.guid._ || item.guid.value || item.guid),\n    item.link,\n    item.id,\n  ].filter((v) => typeof v === 'string');\n  for (const c of cands) {\n    const m = c.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n    if (m) return m[0];\n  }\n  const html = [item.description, item.content, item['content:encoded']]\n    .filter(Boolean).join(' ');\n  const m = html.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n  return m ? m[0] : '';\n}\n\n// ------------------------------------------------------------------- public\n\nfunction parsePin(item, opts = {}) {\n  const pin_url = extractPinUrl(item);\n  const etsy = extractEtsy(item);\n  if (!etsy) {\n    return { ok: false, reason: 'no_etsy_link', pin_url,\n             title: cleanText(item.title).slice(0, 120) };\n  }\n  const rawImage = extractImage(item);\n  const cands = imageCandidates(rawImage);\n  const title = cleanText(item.title);\n  const description = cleanText(\n    item.description || item.content || item['content:encoded'] || item.summary || ''\n  );\n  if (!cands.length) {\n    return { ok: false, reason: 'no_image', pin_url, title,\n             etsy_listing_id: etsy.etsy_listing_id };\n  }\n  return {\n    ok: true,\n    etsy_listing_id: etsy.etsy_listing_id,\n    etsy_url: etsy.etsy_url,\n    title,\n    description,\n    image_url: cands[0],          // provisional; HEAD-verified downstream\n    image_candidates: cands,\n    pin_url,\n    board_slug: opts.board_slug || '',\n  };\n}\n\n/**\n * Pin page -> destination (Etsy) URL.\n *\n * Pinterest's board RSS does not publish a pin's outbound link (verified\n * against a real board: 26/26 pins had no destination URL anywhere in the\n * feed). The link only exists on the pin page itself, inside the embedded\n * JSON blob Pinterest ships for client-side hydration.\n *\n * Part of the Pinterest source layer. Everything here disappears if the\n * source is later swapped for the Etsy API.\n */\n\n// ETSY_LISTING_RE is provided by the inlined pin-parser above.\n\n/** Pin id from any pinterest pin URL form. */\nfunction pinId(url) {\n  const m = String(url || '').match(/\\/pin\\/(\\d+)/);\n  return m ? m[1] : '';\n}\n\n/**\n * Pinterest ships the pin's outbound URL under several JSON keys depending on\n * which renderer served the page. Ordered most- to least-specific; the first\n * that yields an Etsy listing wins.\n */\nconst JSON_LINK_KEYS = [\n  'link',            // canonical destination on the Pin object\n  'tracked_link',    // click-tracking wrapper, still contains the target\n  'domain_url',\n  'seo_canonical_url',\n];\n\n/**\n * Extract every plausible destination URL from a pin page's HTML.\n * Returns them in confidence order; callers pick the first Etsy listing.\n *\n * Works on the raw HTML string - no DOM, no browser. JSON string values are\n * escaped (\\/), so unescape before matching.\n */\nfunction destinationCandidates(html) {\n  const s = String(html || '');\n  const out = [];\n  const push = (v) => {\n    if (!v) return;\n    const u = String(v).replace(/\\\\u002F/gi, '/').replace(/\\\\\\//g, '/').trim();\n    if (/^https?:\\/\\//i.test(u)) out.push(u);\n  };\n\n  // 1. Explicit JSON keys, e.g.  \"link\":\"https:\\/\\/www.etsy.com\\/listing\\/123\"\n  for (const key of JSON_LINK_KEYS) {\n    const re = new RegExp(`\"${key}\"\\\\s*:\\\\s*\"((?:[^\"\\\\\\\\]|\\\\\\\\.)*)\"`, 'gi');\n    for (const m of s.matchAll(re)) push(m[1]);\n  }\n\n  // 2. og:see_also / canonical-style meta tags sometimes carry the target.\n  for (const m of s.matchAll(\n    /<meta[^>]+(?:property|name)\\s*=\\s*[\"'](?:og:see_also|pinterest:link)[\"'][^>]+content\\s*=\\s*[\"']([^\"']+)[\"']/gi\n  )) push(m[1]);\n\n  // 3. Last resort: any Etsy listing URL anywhere in the document, including\n  //    inside escaped JSON. This is what actually survives Pinterest's\n  //    frequent renderer changes.\n  for (const m of s.matchAll(/https?:(?:\\\\u002F|\\\\\\/|\\/){2}(?:[a-z0-9-]+\\.)?etsy\\.com(?:\\\\u002F|\\\\\\/|\\/)[^\"'\\s<>\\\\]*(?:(?:\\\\u002F|\\\\\\/|\\/)[^\"'\\s<>\\\\]*)*/gi)) {\n    push(m[0]);\n  }\n\n  const seen = new Set();\n  return out.filter((u) => !seen.has(u) && seen.add(u));\n}\n\n/**\n * Resolve a pin page's HTML to an Etsy listing.\n * @returns {{ok:true, etsy_listing_id, etsy_url}|{ok:false, reason, diagnostics}}\n */\nfunction resolveEtsyFromHtml(html, opts = {}) {\n  const s = String(html || '');\n  const diagnostics = diagnose(s);\n\n  for (const cand of destinationCandidates(s)) {\n    const m = cand.match(ETSY_LISTING_RE);\n    if (m) {\n      return {\n        ok: true,\n        etsy_listing_id: m[1],\n        etsy_url: `https://www.etsy.com/listing/${m[1]}`,\n        matched_from: cand.slice(0, 200),\n      };\n    }\n  }\n\n  // A non-Etsy destination is a legitimate outcome (pin points elsewhere),\n  // and must be distinguished from \"Pinterest blocked us\".\n  const anyDest = destinationCandidates(s).find((u) => !/pinterest\\.|pinimg\\./i.test(u));\n  return {\n    ok: false,\n    reason: diagnostics.looks_blocked ? 'blocked_or_login_wall'\n      : anyDest ? 'destination_not_etsy'\n      : 'no_destination_found',\n    sample_destination: anyDest ? anyDest.slice(0, 200) : '',\n    diagnostics,\n    pin_url: opts.pin_url || '',\n  };\n}\n\n/** Cheap signals for telling a real pin page from a bot wall. */\nfunction diagnose(html) {\n  const s = String(html || '');\n  return {\n    html_bytes: s.length,\n    has_pws_data: /__PWS_(?:DATA|INITIAL_PROPS)__/.test(s),\n    has_pin_json: /\"pin\"\\s*:\\s*\\{|\"objectType\"\\s*:\\s*\"pin\"/i.test(s),\n    mentions_etsy: /etsy\\.com/i.test(s),\n    looks_blocked:\n      s.length < 20000\n      || /captcha|are you a robot|unusual traffic/i.test(s)\n      || (/log ?in to (?:see|continue)/i.test(s) && !/__PWS_/.test(s)),\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Phase 2: turn fetched pin pages into `pins` row updates.\n//\n// Input: one item per fetched pin page (HTTP Request, responseFormat=text,\n// fullResponse, neverError). Pairing back to the pin is done by index, which\n// is safe because the HTTP node emits exactly one item per input item.\n// Mode: Run Once for All Items.\n\nconst pending = $('Pins To Resolve').all().map((i) => i.json);\nconst cfg = $('Config').first().json;\nconst maxAttempts = cfg._resolve_max_attempts;\nconst now = new Date().toISOString();\n\nconst out = [];\nconst all = $input.all();\n\nfor (let i = 0; i < all.length; i++) {\n  const j = all[i].json || {};\n  const pin = pending[i] || {};\n  const pin_id = pin.pin_id || '';\n  const attempts = (Number(pin.resolve_attempts) || 0) + 1;\n\n  const html = typeof j.data === 'string' ? j.data\n    : typeof j.body === 'string' ? j.body : '';\n  const status = j.statusCode ?? null;\n\n  let update;\n  if (!html) {\n    update = {\n      resolve_status: attempts >= maxAttempts ? 'failed' : 'new',\n      resolve_error: `empty response (http ${status ?? 'n/a'})`,\n    };\n  } else {\n    const r = resolveEtsyFromHtml(html, { pin_url: pin.pin_url });\n    if (r.ok) {\n      update = {\n        etsy_listing_id: r.etsy_listing_id,\n        resolve_status: 'ok',\n        resolve_error: '',\n        resolved_at: now,\n      };\n    } else if (r.reason === 'destination_not_etsy') {\n      // A pin pointing somewhere other than Etsy is a permanent outcome, not\n      // a failure to retry.\n      update = { resolve_status: 'not_etsy', resolve_error: r.sample_destination || '' };\n    } else {\n      update = {\n        resolve_status: attempts >= maxAttempts ? 'failed' : 'new',\n        resolve_error: `${r.reason} (http ${status ?? 'n/a'}, `\n          + `${r.diagnostics?.html_bytes ?? 0} bytes)`,\n      };\n    }\n  }\n\n  out.push({ json: {\n    pin_id,\n    pin_url: pin.pin_url || '',\n    board_slug: pin.board_slug || '',\n    resolve_attempts: attempts,\n    etsy_listing_id: update.etsy_listing_id ?? (pin.etsy_listing_id || ''),\n    resolved_at: update.resolved_at ?? pin.resolved_at ?? null,\n    resolve_status: update.resolve_status,\n    resolve_error: String(update.resolve_error || '').slice(0, 500),\n    http_status: status,\n  } });\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "dt-updatepin",
+      "name": "Update Pin",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        2640,
+        480
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "HBshV0j15En0ZX6S"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "pin_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.pin_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "etsy_listing_id": "={{ $json.etsy_listing_id }}",
+            "resolve_status": "={{ $json.resolve_status }}",
+            "resolve_error": "={{ $json.resolve_error }}",
+            "resolve_attempts": "={{ $json.resolve_attempts }}",
+            "resolved_at": "={{ $json.resolved_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-group",
+      "name": "Group By Listing",
+      "notes": "One item per Etsy listing, board_slugs merged - never a duplicate.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        480
+      ],
+      "parameters": {
+        "jsCode": "// Phase 3: collapse resolved pins into one work item per Etsy listing.\n//\n// A listing pinned on several boards must produce ONE items row carrying all\n// its board_slugs, never a duplicate per board - that is the whole point of\n// keying on etsy_listing_id. Mode: Run Once for All Items.\n\nconst byListing = new Map();\n\nfor (const item of $input.all()) {\n  const p = item.json || {};\n  if (p.resolve_status !== 'ok' || !p.etsy_listing_id) continue;\n\n  const id = String(p.etsy_listing_id);\n  const cur = byListing.get(id) || {\n    etsy_listing_id: id,\n    etsy_url: `https://www.etsy.com/listing/${id}`,\n    title: '',\n    description: '',\n    image_url: '',\n    image_candidates: [],\n    board_slugs: [],\n    pin_urls: [],\n  };\n\n  // Prefer the richest text across the pins pointing at this listing.\n  const t = String(p.title || '');\n  const d = String(p.description || '');\n  if (t.length > cur.title.length) cur.title = t;\n  if (d.length > cur.description.length) cur.description = d;\n\n  if (!cur.image_url && p.image_url) cur.image_url = String(p.image_url);\n  if (!cur.image_candidates.length && p.image_candidates) {\n    try {\n      const c = typeof p.image_candidates === 'string'\n        ? JSON.parse(p.image_candidates) : p.image_candidates;\n      if (Array.isArray(c)) cur.image_candidates = c;\n    } catch { /* keep empty; image_url still set */ }\n  }\n  if (p.board_slug && !cur.board_slugs.includes(p.board_slug)) cur.board_slugs.push(p.board_slug);\n  if (p.pin_url && !cur.pin_urls.includes(p.pin_url)) cur.pin_urls.push(p.pin_url);\n\n  byListing.set(id, cur);\n}\n\nconst out = [...byListing.values()];\nif (!out.length) {\n  return [{ json: { _kind: 'none', message: 'No newly resolved listings this run.' } }];\n}\n\n// Expose an explicit candidate ladder for the HEAD-check chain downstream.\n//\n// Measured against real pins: /originals/*.jpg often 403s (hotlink\n// protection, or the original is simply a PNG), /originals/*.png returns the\n// true original (~850KB), and /1200x/ and /736x/ are byte-identical\n// (~110KB). So three checks are worth making; the fourth is the safety net.\n// Gaps are filled with the last known candidate so every slot is a real URL.\nreturn out.map((v) => {\n  const c = v.image_candidates.length ? v.image_candidates : [v.image_url].filter(Boolean);\n  const at = (i) => c[i] || c[c.length - 1] || v.image_url || '';\n  return { json: { _kind: 'listing', ...v,\n    image_c1: at(0),\n    image_c2: at(1),\n    image_c3: at(2),\n    image_c4: at(3),\n  } };\n});\n"
+      }
+    },
+    {
+      "id": "if-listings",
+      "name": "Have Listings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "listing",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "loop-listings",
+      "name": "Loop Listings",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3300,
+        380
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-getitem",
+      "name": "Get Existing Item",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        3520,
+        480
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "JaT1fvUeN6R77Pg2"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "etsy_listing_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.etsy_listing_id }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      }
+    },
+    {
+      "id": "cd-merge",
+      "name": "Merge Item",
+      "notes": "Additive merge of board_slugs and pin_urls onto any existing row.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        480
+      ],
+      "parameters": {
+        "jsCode": "// Phase 3: merge this listing with the items row that may already exist.\n//\n// Data tables have no UNIQUE constraint, so \"never create a duplicate\" is\n// enforced here plus the upsert filter on etsy_listing_id. Merging is additive:\n// a listing pinned on a new board gains that slug and keeps the old ones.\n// Mode: Run Once for All Items.\n\nconst listing = $('Loop Listings').first().json;\nconst now = new Date().toISOString();\n\n// \"Get Existing Item\" has alwaysOutputData, so a miss arrives as an item with\n// no etsy_listing_id rather than as zero items.\nconst existingRows = $input.all()\n  .map((i) => i.json || {})\n  .filter((r) => r.etsy_listing_id);\nconst existing = existingRows[0] || null;\n\nconst parseList = (v) => {\n  if (Array.isArray(v)) return v;\n  if (typeof v === 'string' && v.trim()) {\n    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }\n  }\n  return [];\n};\n\nconst mergeUnique = (a, b) => {\n  const out = [];\n  const seen = new Set();\n  for (const v of [...a, ...b]) {\n    const s = String(v || '').trim();\n    if (s && !seen.has(s)) { seen.add(s); out.push(s); }\n  }\n  return out;\n};\n\nconst board_slugs = mergeUnique(parseList(existing?.board_slugs), listing.board_slugs);\nconst pin_urls = mergeUnique(parseList(existing?.pin_urls), listing.pin_urls);\n\nreturn [{ json: {\n  row_id: existing?.id ?? null,\n  is_new: !existing,\n  etsy_listing_id: listing.etsy_listing_id,\n  etsy_url: listing.etsy_url,\n  // Keep existing text if the new pin has less to say.\n  title: (listing.title || '').length > String(existing?.title || '').length\n    ? listing.title : String(existing?.title || ''),\n  description: (listing.description || '').length > String(existing?.description || '').length\n    ? listing.description : String(existing?.description || ''),\n  board_slugs: JSON.stringify(board_slugs),\n  pin_urls: JSON.stringify(pin_urls),\n  first_seen_at: existing?.first_seen_at || now,\n  last_seen_at: now,\n  // Carried through for the image HEAD checks downstream.\n  image_c1: listing.image_c1,\n  image_c2: listing.image_c2,\n  image_c3: listing.image_c3,\n  image_c4: listing.image_c4,\n  existing_image_url: String(existing?.image_url || ''),\n} }];\n"
+      }
+    },
+    {
+      "id": "http-img1",
+      "name": "Verify Image 1",
+      "notes": "HEAD only - no body transferred.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        3960,
+        480
+      ],
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $('Merge Item').first().json.image_c1 }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "http-img2",
+      "name": "Verify Image 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4180,
+        480
+      ],
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $('Merge Item').first().json.image_c2 }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "http-img3",
+      "name": "Verify Image 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4400,
+        480
+      ],
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $('Merge Item').first().json.image_c3 }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cd-pick",
+      "name": "Pick Image",
+      "notes": "Highest resolution that answered 200.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        480
+      ],
+      "parameters": {
+        "jsCode": "// Phase 3: choose the highest-resolution image URL that actually loads.\n//\n// Three HEAD checks run unconditionally - they carry no body, and newly\n// resolved listings are rare. Measured on real pins:\n//   /originals/*.jpg  often 403 (hotlink protection, or original is a PNG)\n//   /originals/*.png  200, the true original (~850KB)\n//   /1200x/*.jpg      200 (~110KB, byte-identical to /736x/)\n// Whichever answers 200 first wins. If none do we keep the last candidate\n// anyway: Workflow C can still publish it by downloading the bytes and\n// uploading them to Facebook as a file.\n// Mode: Run Once for All Items.\n\nconst merged = $('Merge Item').first().json;\n\nconst statusOf = (nodeName) => {\n  try {\n    return ($(nodeName).first().json || {}).statusCode ?? null;\n  } catch {\n    return null; // node did not run\n  }\n};\n\nconst ladder = [\n  { url: merged.image_c1, status: statusOf('Verify Image 1'), label: 'originals-jpg' },\n  { url: merged.image_c2, status: statusOf('Verify Image 2'), label: 'originals-png' },\n  { url: merged.image_c3, status: statusOf('Verify Image 3'), label: '1200x' },\n];\n\nconst hit = ladder.find((c) => c.status === 200 && c.url);\n\nconst image_url = hit ? hit.url\n  : (merged.image_c4 || merged.existing_image_url || merged.image_c1 || '');\n\nconst image_check = hit\n  ? `${hit.label} 200`\n  : ladder.map((c) => `${c.label} ${c.status ?? 'n/a'}`).join(', ')\n    + ' - unverified, Workflow C will upload the bytes instead';\n\nreturn [{ json: {\n  etsy_listing_id: merged.etsy_listing_id,\n  etsy_url: merged.etsy_url,\n  title: merged.title,\n  description: merged.description,\n  image_url,\n  board_slugs: merged.board_slugs,\n  pin_urls: merged.pin_urls,\n  first_seen_at: merged.first_seen_at,\n  last_seen_at: merged.last_seen_at,\n  _is_new: merged.is_new,\n  _image_check: image_check,\n} }];\n"
+      }
+    },
+    {
+      "id": "dt-upsertitem",
+      "name": "Upsert Item",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        4840,
+        480
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "JaT1fvUeN6R77Pg2"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "etsy_listing_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.etsy_listing_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "etsy_listing_id": "={{ $json.etsy_listing_id }}",
+            "etsy_url": "={{ $json.etsy_url }}",
+            "title": "={{ $json.title }}",
+            "description": "={{ $json.description }}",
+            "image_url": "={{ $json.image_url }}",
+            "board_slugs": "={{ $json.board_slugs }}",
+            "pin_urls": "={{ $json.pin_urls }}",
+            "first_seen_at": "={{ $json.first_seen_at }}",
+            "last_seen_at": "={{ $json.last_seen_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-summary",
+      "name": "Sync Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Final report for a sync run. Reads the phase nodes rather than recomputing,\n// and tolerates phases that did not run (no boards, nothing to resolve).\n// Mode: Run Once for All Items.\n\nconst safe = (name, fn, dflt) => {\n  try { return fn($(name).all().map((i) => i.json || {})); } catch { return dflt; }\n};\n\nconst boards = safe('Boards To Sync', (r) => r.filter((x) => x._kind === 'board'), []);\nconst resolved = safe('Resolve Pin Result', (r) => r, []);\nconst listings = safe('Group By Listing', (r) => r.filter((x) => x._kind === 'listing'), []);\nconst attempted = safe('Pins To Resolve', (r) => r.filter((x) => x._kind !== 'none'), []);\n\nconst byStatus = resolved.reduce((a, r) => {\n  const k = r.resolve_status || 'unknown';\n  a[k] = (a[k] || 0) + 1;\n  return a;\n}, {});\n\nreturn [{ json: {\n  workflow: 'A - Sync Boards',\n  finished_at: new Date().toISOString(),\n  boards_synced: boards.length,\n  boards: boards.map((b) => b.board_slug),\n  pins_resolve_attempted: attempted.length,\n  resolve_outcomes: byStatus,\n  listings_upserted: listings.length,\n  listings: listings.map((l) => ({\n    etsy_listing_id: l.etsy_listing_id,\n    title: String(l.title || '').slice(0, 70),\n  })),\n  note: attempted.length >= ($('Config').first().json._resolve_max || 10)\n    ? 'Hit PIN_RESOLVE_MAX_PER_RUN - more pins remain queued for the next run.'\n    : 'All known pins have been processed.',\n} }];\n"
+      }
+    },
+    {
+      "id": "dt-summarylog",
+      "name": "Write Summary Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        3740,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "A - Sync Boards",
+            "level": "info",
+            "context": "=sync_summary",
+            "message": "={{ JSON.stringify($json) }}",
+            "created_at": "={{ $json.finished_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Sync": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load Boards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Boards": {
+      "main": [
+        [
+          {
+            "node": "Boards To Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Boards To Sync": {
+      "main": [
+        [
+          {
+            "node": "Have Boards?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Have Boards?": {
+      "main": [
+        [
+          {
+            "node": "Loop Boards",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write No Boards Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write No Boards Log": {
+      "main": [
+        [
+          {
+            "node": "Load Pending Pins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Boards": {
+      "main": [
+        [
+          {
+            "node": "Load Pending Pins",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Current Board",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current Board": {
+      "main": [
+        [
+          {
+            "node": "Touch Board",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Touch Board": {
+      "main": [
+        [
+          {
+            "node": "Read Board RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Board RSS": {
+      "main": [
+        [
+          {
+            "node": "Parse Pins To Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pins To Rows": {
+      "main": [
+        [
+          {
+            "node": "Pin Or Log?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Or Log?": {
+      "main": [
+        [
+          {
+            "node": "New Pins Only",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write Board Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Pins Only": {
+      "main": [
+        [
+          {
+            "node": "Insert Pin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Pin": {
+      "main": [
+        [
+          {
+            "node": "Loop Boards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Board Log": {
+      "main": [
+        [
+          {
+            "node": "Loop Boards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Pending Pins": {
+      "main": [
+        [
+          {
+            "node": "Pins To Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pins To Resolve": {
+      "main": [
+        [
+          {
+            "node": "Anything To Resolve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything To Resolve?": {
+      "main": [
+        [
+          {
+            "node": "Sync Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Pin Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pin Page": {
+      "main": [
+        [
+          {
+            "node": "Resolve Pin Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Pin Result": {
+      "main": [
+        [
+          {
+            "node": "Update Pin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Pin": {
+      "main": [
+        [
+          {
+            "node": "Group By Listing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group By Listing": {
+      "main": [
+        [
+          {
+            "node": "Have Listings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Have Listings?": {
+      "main": [
+        [
+          {
+            "node": "Loop Listings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Listings": {
+      "main": [
+        [
+          {
+            "node": "Sync Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Existing Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Item": {
+      "main": [
+        [
+          {
+            "node": "Merge Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Item": {
+      "main": [
+        [
+          {
+            "node": "Verify Image 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Image 1": {
+      "main": [
+        [
+          {
+            "node": "Verify Image 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Image 2": {
+      "main": [
+        [
+          {
+            "node": "Verify Image 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Image 3": {
+      "main": [
+        [
+          {
+            "node": "Pick Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Image": {
+      "main": [
+        [
+          {
+            "node": "Upsert Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Item": {
+      "main": [
+        [
+          {
+            "node": "Loop Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Summary": {
+      "main": [
+        [
+          {
+            "node": "Write Summary Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "timezone": "Europe/Belgrade",
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "PvlehC1HppyNUe9b"
+  },
+  "staticData": {
+    "node:Every 6 Hours": {
+      "recurrenceRules": [
+        12
+      ],
+      "recurrenceRuleSignatures": [
+        "hours:6"
+      ]
+    }
+  },
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "fwvz0DCV8qUgISNJ",
+      "projectId": "ddGoL4iYjV8UejMn",
+      "project": {
+        "id": "ddGoL4iYjV8UejMn",
+        "name": "Raf Arak <rafaraksrb@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-09-30T15:35:08.876Z",
+        "updatedAt": "2026-09-30T15:37:26.910Z"
+      },
+      "createdAt": "2026-09-30T21:21:41.460Z",
+      "updatedAt": "2026-09-30T21:21:41.460Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "d4d44b60-f1fa-483d-9f19-e5ae4f56f45d",
+    "workflowId": "fwvz0DCV8qUgISNJ",
+    "nodes": [
+      {
+        "id": "sn-overview",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -620,
+          -420
+        ],
+        "parameters": {
+          "width": 520,
+          "height": 400,
+          "color": 3,
+          "content": "## A - Sync Boards\n\nRuns every 6 hours, or on demand. **Collects data only - never posts.**\n\n**Phase 1** read each board's RSS, record every pin in `pins`.\n**Phase 2** pins have no Etsy link in RSS, so fetch the pin page and\nrecover it (capped by `PIN_RESOLVE_MAX_PER_RUN`).\n**Phase 3** collapse resolved pins into `items`, one row per listing.\n\nEvery board is synced **whether enabled or not** - `enabled` controls\npublishing (Workflow B), not collection, so enabling a board later\nalready has a backlog.\n\nA dead board is logged to `errors_log` and the others carry on."
+        }
+      },
+      {
+        "id": "sn-isolation",
+        "name": "Sticky Note1",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -620,
+          40
+        ],
+        "parameters": {
+          "width": 520,
+          "height": 260,
+          "color": 4,
+          "content": "### Source isolation\n\nThis workflow is the **only** Pinterest-aware part of the system.\nIt writes `items` keyed on `etsy_listing_id`, and `pins` as its own\nprivate cache.\n\nWorkflows B, C and D read `items`/`schedule` and never reference a pin,\na board RSS URL or an i.pinimg.com address. Replacing this workflow with\nthe Etsy API leaves them untouched."
+        }
+      },
+      {
+        "id": "trg-cron",
+        "name": "Every 6 Hours",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -40,
+          -200
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "hours",
+                "hoursInterval": 6
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "trg-manual",
+        "name": "Manual Sync",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -40,
+          -40
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "dt-config",
+        "name": "Load Config",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          200,
+          -120
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "Fzx5awBGnmaDaffF"
+          },
+          "matchType": "allConditions",
+          "filters": {},
+          "returnAll": true
+        }
+      },
+      {
+        "id": "cd-config",
+        "name": "Config",
+        "notes": "Flattens the config table and applies defaults for missing keys.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          420,
+          -120
+        ],
+        "parameters": {
+          "jsCode": "// Flattens the config table into one object so later nodes can read settings\n// as $('Config').first().json.SLOTS instead of searching rows.\n// Defaults are applied for any key missing from the table, so the workflow\n// still runs on a fresh install. Mode: Run Once for All Items.\n\nconst DEFAULTS = {\n  TIMEZONE: 'Europe/Belgrade',\n  SLOTS: '10:00,15:00,20:00',\n  TEXT_MODE: 'pinterest',\n  REPOST_AFTER_DAYS: '60',\n  SCHEDULE_HORIZON_DAYS: '14',\n  MAX_QUEUE_PER_RUN: '60',\n  RETRY_DELAY_MINUTES: '30',\n  EXTRA_HASHTAGS: '',\n  POST_TEXT_MAX_CHARS: '600',\n  FB_PAGE_ID: '',\n  PIN_RESOLVE_MAX_PER_RUN: '10',\n  RESOLVE_THROTTLE_MS: '2000',\n  RESOLVE_MAX_ATTEMPTS: '3',\n  DRY_RUN: 'true',\n  MAX_PUBLISH_PER_RUN: '20',\n  FB_API_VERSION: 'v21.0',\n  AUTH_MODE: 'oauth',\n};\n\nconst cfg = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.key) cfg[String(r.key)] = r.value == null ? '' : String(r.value);\n}\n\n// Typed views, so consumers never re-parse strings.\ncfg._slots = String(cfg.SLOTS).split(',').map((s) => s.trim()).filter(Boolean);\ncfg._repost_after_days = Number(cfg.REPOST_AFTER_DAYS) || 0;\ncfg._resolve_max = Math.max(1, Number(cfg.PIN_RESOLVE_MAX_PER_RUN) || 10);\ncfg._throttle_ms = Math.max(0, Number(cfg.RESOLVE_THROTTLE_MS) || 0);\ncfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);\ncfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);\ncfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);\ncfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);\ncfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);\ncfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);\n// Anything but an explicit \"false\" keeps the safety on.\ncfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';\n// Anything other than an explicit \"token\" means the OAuth login path.\ncfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'\n  ? 'token' : 'oauth';\n\nreturn [{ json: cfg }];\n"
+        }
+      },
+      {
+        "id": "dt-boards",
+        "name": "Load Boards",
+        "notes": "All boards, enabled or not - enabled gates publishing, not collection.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          640,
+          -120
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "eHP9QfDm4Ay8F0HE"
+          },
+          "matchType": "allConditions",
+          "filters": {},
+          "returnAll": true
+        }
+      },
+      {
+        "id": "cd-boards",
+        "name": "Boards To Sync",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          860,
+          -120
+        ],
+        "parameters": {
+          "jsCode": "// Normalizes the boards table into sync work items.\n//\n// Every board is synced whether or not it is enabled - `enabled` controls\n// PUBLISHING (Workflow B), not collection. We keep accumulating pins for\n// disabled boards so that enabling one later has a backlog ready.\n// Mode: Run Once for All Items.\n\nconst rows = $input.all().map((i) => i.json || {}).filter((r) => r.board_slug || r.rss_url);\nconst now = new Date().toISOString();\n\nconst valid = [];\nconst bad = [];\n\nfor (const r of rows) {\n  const slug = String(r.board_slug || '').trim();\n  const url = String(r.rss_url || '').trim();\n  if (!slug || !/^https?:\\/\\//i.test(url)) {\n    bad.push({ slug, url });\n    continue;\n  }\n  valid.push({\n    row_id: r.id,\n    board_slug: slug,\n    name: String(r.name || slug),\n    rss_url: url,\n    enabled: r.enabled === true,\n    priority: Number(r.priority) || 0,\n  });\n}\n\nif (!valid.length) {\n  return [{ json: {\n    _kind: 'log',\n    workflow: 'A - Sync Boards',\n    level: 'warn',\n    context: 'load_boards',\n    message: rows.length\n      ? `No usable boards. ${bad.length} row(s) lack a slug or a valid rss_url.`\n      : 'The boards table is empty. Add a board via Workflow D or the table UI.',\n    created_at: now,\n  } }];\n}\n\n// Highest priority first, so a run that hits a cap does the important boards.\nvalid.sort((a, b) => b.priority - a.priority || a.board_slug.localeCompare(b.board_slug));\nreturn valid.map((b) => ({ json: { _kind: 'board', ...b } }));\n"
+        }
+      },
+      {
+        "id": "if-boards",
+        "name": "Have Boards?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1080,
+          -120
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._kind }}",
+                "rightValue": "board",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "loop-boards",
+        "name": "Loop Boards",
+        "notes": "One board at a time, so a feed error is attributable to its board.",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1300,
+          -220
+        ],
+        "parameters": {
+          "batchSize": 1,
+          "options": {}
+        }
+      },
+      {
+        "id": "cd-current",
+        "name": "Current Board",
+        "notes": "Stable single-item reference for the rest of the iteration.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1540,
+          -220
+        ],
+        "parameters": {
+          "jsCode": "// Passthrough for the board currently being iterated.\n//\n// Exists so downstream nodes can reference ONE stable, single-item\n// node instead of $('Loop Boards'), which does not resolve from\n// branches that sit behind a data-table write (item lineage is lost\n// there, and .first() returns undefined).\n// Mode: Run Once for All Items.\n\nconst b = $input.first().json;\nreturn [{ json: { ...b, last_synced_at: new Date().toISOString() } }];\n"
+        }
+      },
+      {
+        "id": "rss",
+        "name": "Read Board RSS",
+        "notes": "Continues on error: a renamed or secret board is logged, not fatal.",
+        "type": "n8n-nodes-base.rssFeedRead",
+        "typeVersion": 1.2,
+        "alwaysOutputData": true,
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "onError": "continueRegularOutput",
+        "position": [
+          1540,
+          -120
+        ],
+        "parameters": {
+          "url": "={{ $('Current Board').first().json.rss_url }}",
+          "options": {
+            "ignoreSSL": false
+          }
+        }
+      },
+      {
+        "id": "cd-parse",
+        "name": "Parse Pins To Rows",
+        "notes": "RSS items -> pins rows + log rows. Only Pinterest-aware code here.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1760,
+          -120
+        ],
+        "parameters": {
+          "jsCode": "/**\n * Pinterest pin -> Etsy listing extraction.\n *\n * This is the ONLY place that knows Pinterest exists. It is kept as a plain\n * module so it can be unit-tested outside n8n; the same body is pasted into\n * Workflow A's \"Parse Pins\" Code node.\n *\n * Contract (the isolation boundary the rest of the system depends on):\n *   input : a raw RSS item object from the RSS Feed Read node\n *   output: { ok: true, etsy_listing_id, etsy_url, title, description,\n *             image_url, image_candidates, pin_url }\n *        or { ok: false, reason, pin_url }\n *\n * Workflows B/C/D never see a field from this file other than the ones above,\n * and key off etsy_listing_id. Swapping in the Etsy API later means replacing\n * this file and nothing else.\n */\n\n// ---------------------------------------------------------------- HTML text\n\nconst ENTITIES = {\n  amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n  hellip: '…', mdash: '—', ndash: '–', rsquo: '’',\n  lsquo: '‘', ldquo: '“', rdquo: '”', middot: '·',\n  eacute: 'é', trade: '™', reg: '®', copy: '©',\n};\n\nfunction decodeEntities(s) {\n  return String(s || '')\n    .replace(/&#x([0-9a-f]+);/gi, (_, h) => safeCodePoint(parseInt(h, 16)))\n    .replace(/&#(\\d+);/g, (_, d) => safeCodePoint(parseInt(d, 10)))\n    .replace(/&([a-z]+);/gi, (m, name) => {\n      const k = name.toLowerCase();\n      return Object.prototype.hasOwnProperty.call(ENTITIES, k) ? ENTITIES[k] : m;\n    });\n}\n\nfunction safeCodePoint(n) {\n  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';\n  try { return String.fromCodePoint(n); } catch { return ''; }\n}\n\n// Pinterest boilerplate that adds nothing to a Facebook caption.\nconst BOILERPLATE = [\n  /\\b(?:this|these)\\s+pins?\\s+(?:was|were)\\s+discovered\\s+by[^.]*\\.?/i,\n  /\\bdiscover\\s+\\(and\\s+save!?\\)\\s+your\\s+own\\s+pins\\s+on\\s+pinterest\\.?/i,\n  /\\bfind\\s+this\\s+pin\\s+and\\s+more\\s+on\\s+[^.|]*\\s+by\\s+[^.|]*\\.?/i,\n  /\\bsaved?\\s+(from|to)\\s+pinterest\\.?/i,\n  /\\bmore\\s+ideas\\s+about\\s+[^.]*\\./i,\n  /\\bclick\\s+(the\\s+)?link\\s+(in\\s+bio|to\\s+(shop|buy|view))\\b[^.]*\\.?/i,\n  /\\bvisit\\s+(my|our)\\s+(etsy\\s+)?shop\\s+for\\s+more\\b[^.]*\\.?/i,\n];\n\n/** Strip tags, decode entities, drop boilerplate, collapse whitespace. */\nfunction cleanText(html) {\n  let s = String(html == null ? '' : html);\n  s = s.replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n       .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ');\n  // Keep paragraph/line structure before tags are removed.\n  s = s.replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/p>/gi, '\\n\\n');\n  s = s.replace(/<[^>]*>/g, ' ');\n  s = decodeEntities(s);\n  // A bare Pinterest/Etsy URL left in the body is noise; the link is appended\n  // deliberately at the end of the caption by Workflow B.\n  s = s.replace(/https?:\\/\\/(www\\.)?(pinterest\\.[a-z.]+|pin\\.it|etsy\\.com)\\/\\S*/gi, ' ');\n  for (const re of BOILERPLATE) s = s.replace(re, ' ');\n  s = s.replace(/[ \\t ]+/g, ' ')\n       .replace(/ ?\\n ?/g, '\\n')\n       .replace(/\\n{3,}/g, '\\n\\n')\n       .trim();\n  return s;\n}\n\n// ---------------------------------------------------------------- Etsy link\n\n/**\n * Etsy listing URLs we accept:\n *   https://www.etsy.com/listing/1234567890/slug?utm_source=...\n *   https://etsy.com/listing/1234567890\n *   https://www.etsy.com/il-en/listing/1234567890/slug   (locale prefix)\n *   https://www.etsy.com/shop/X/listing/1234567890/slug\n * Rejected: anything without a /listing/{digits} segment.\n */\nconst ETSY_LISTING_RE = /https?:\\/\\/(?:[a-z0-9-]+\\.)?etsy\\.com\\/(?:[a-z]{2}-[a-z]{2}\\/)?(?:[^\\s\"'<>?#]*\\/)?listing\\/(\\d{6,15})(?:[\\/?#][^\\s\"'<>]*)?/i;\n\n/** Pinterest wraps outbound links in a redirector; unwrap before matching. */\nfunction unwrapRedirect(url) {\n  const s = String(url || '');\n  const m = s.match(/[?&](?:url|u|redirect|target|dest)=([^&]+)/i);\n  if (!m) return s;\n  try {\n    const inner = decodeURIComponent(m[1]);\n    if (/^https?:\\/\\//i.test(inner)) return inner;\n  } catch { /* malformed escape - fall through */ }\n  return s;\n}\n\n/** Collect every plausible URL from an RSS item, in order of trustworthiness. */\nfunction linkCandidates(item) {\n  const out = [];\n  const push = (v) => { if (v && typeof v === 'string') out.push(v); };\n\n  push(item.link);\n  push(item.guid && (item.guid._ || item.guid.value || item.guid));\n  push(item.id);\n  // Some feeds put the outbound URL in an enclosure or a namespaced field.\n  if (item.enclosure && item.enclosure.url) push(item.enclosure.url);\n  push(item['pinterest:link']);\n\n  const html = [\n    item.description,\n    item.content,\n    item['content:encoded'],\n    item.contentSnippet,\n    item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Every href/src in the HTML, plus any bare URL in the text.\n  for (const m of html.matchAll(/(?:href|src)\\s*=\\s*[\"']([^\"']+)[\"']/gi)) push(m[1]);\n  for (const m of html.matchAll(/https?:\\/\\/[^\\s\"'<>)]+/gi)) push(m[0]);\n\n  return out.map(unwrapRedirect);\n}\n\n/** First Etsy listing link found, normalized. null when the pin has none. */\nfunction extractEtsy(item) {\n  for (const cand of linkCandidates(item)) {\n    const m = String(cand).match(ETSY_LISTING_RE);\n    if (m) {\n      const id = m[1];\n      return { etsy_listing_id: id, etsy_url: `https://www.etsy.com/listing/${id}` };\n    }\n  }\n  return null;\n}\n\n// ------------------------------------------------------------------- images\n\n/**\n * Pinterest serves the same image at several sizes under a size segment:\n *   https://i.pinimg.com/236x/ab/cd/ef/abcdef123.jpg\n *   https://i.pinimg.com/originals/ab/cd/ef/abcdef123.jpg\n * /originals/ is the largest but does not always exist (and can carry a\n * different extension), so return an ordered candidate list. Workflow A\n * HEAD-checks them and stores the first that actually loads.\n */\nconst PINIMG_SIZE_RE = /^(https?:\\/\\/i\\.pinimg\\.com\\/)([^/]+)(\\/.+)$/i;\nconst SIZE_PREFERENCE = ['originals', '1200x', '736x', '564x', '474x', '236x'];\n\nfunction imageCandidates(url) {\n  const s = String(url || '').trim();\n  if (!s) return [];\n  const m = s.match(PINIMG_SIZE_RE);\n  if (!m) return [s];\n  const [, host, currentSize, path] = m;\n  const out = [];\n  for (const size of SIZE_PREFERENCE) {\n    out.push(`${host}${size}${path}`);\n    // /originals/ frequently stores a .png or .webp where the thumb was .jpg.\n    if (size === 'originals') {\n      const swapped = path.replace(/\\.(jpe?g)$/i, '.png');\n      if (swapped !== path) out.push(`${host}${size}${swapped}`);\n    }\n  }\n  if (!SIZE_PREFERENCE.includes(currentSize.toLowerCase())) out.push(s);\n  // De-duplicate, preserve order, and always keep the original as last resort.\n  const seen = new Set();\n  const uniq = out.filter((u) => !seen.has(u) && seen.add(u));\n  if (!uniq.includes(s)) uniq.push(s);\n  return uniq;\n}\n\n/** Pull the pin image out of an RSS item. */\nfunction extractImage(item) {\n  const html = [\n    item.description, item.content, item['content:encoded'], item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Prefer a real media field when the feed provides one.\n  const media = item['media:content'] || item['media:thumbnail'];\n  const mediaUrl = media && (media.url || (media.$ && media.$.url));\n  if (mediaUrl) return String(mediaUrl);\n  if (item.enclosure && item.enclosure.url && /^image\\//i.test(item.enclosure.type || 'image/')) {\n    return String(item.enclosure.url);\n  }\n\n  const img = html.match(/<img[^>]+src\\s*=\\s*[\"']([^\"']+)[\"']/i);\n  if (img) return img[1];\n  const bare = html.match(/https?:\\/\\/i\\.pinimg\\.com\\/[^\\s\"'<>)]+\\.(?:jpe?g|png|webp)/i);\n  return bare ? bare[0] : '';\n}\n\n/** The pin's own Pinterest URL, for the pin_urls audit trail. */\nfunction extractPinUrl(item) {\n  const cands = [\n    item.guid && (item.guid._ || item.guid.value || item.guid),\n    item.link,\n    item.id,\n  ].filter((v) => typeof v === 'string');\n  for (const c of cands) {\n    const m = c.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n    if (m) return m[0];\n  }\n  const html = [item.description, item.content, item['content:encoded']]\n    .filter(Boolean).join(' ');\n  const m = html.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n  return m ? m[0] : '';\n}\n\n// ------------------------------------------------------------------- public\n\nfunction parsePin(item, opts = {}) {\n  const pin_url = extractPinUrl(item);\n  const etsy = extractEtsy(item);\n  if (!etsy) {\n    return { ok: false, reason: 'no_etsy_link', pin_url,\n             title: cleanText(item.title).slice(0, 120) };\n  }\n  const rawImage = extractImage(item);\n  const cands = imageCandidates(rawImage);\n  const title = cleanText(item.title);\n  const description = cleanText(\n    item.description || item.content || item['content:encoded'] || item.summary || ''\n  );\n  if (!cands.length) {\n    return { ok: false, reason: 'no_image', pin_url, title,\n             etsy_listing_id: etsy.etsy_listing_id };\n  }\n  return {\n    ok: true,\n    etsy_listing_id: etsy.etsy_listing_id,\n    etsy_url: etsy.etsy_url,\n    title,\n    description,\n    image_url: cands[0],          // provisional; HEAD-verified downstream\n    image_candidates: cands,\n    pin_url,\n    board_slug: opts.board_slug || '',\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Turns one board's RSS items into `pins` rows plus log rows.\n//\n// Note: a pin row is written even when the feed carries no Etsy link, because\n// Pinterest's RSS never does - the link is recovered from the pin page in\n// phase 2. resolve_status='new' marks a pin as awaiting that step.\n// Mode: Run Once for All Items.\n\nconst board = $('Current Board').first().json;\nconst board_slug = board.board_slug;\nconst rss_url = board.rss_url;\nconst now = new Date().toISOString();\n\nconst rows = [];\nconst rejected = {};\nlet total = 0;\nlet feedError = null;\n\nfor (const item of $input.all()) {\n  const raw = item.json || {};\n\n  // The RSS node continues on error so one dead board cannot stop the rest;\n  // a failed fetch arrives as an item carrying .error.\n  if (raw.error) {\n    feedError = String(raw.error.message || raw.error);\n    break;\n  }\n  // alwaysOutputData can emit one empty placeholder item.\n  if (!raw.title && !raw.link && !raw.guid && !raw.content) continue;\n\n  total++;\n  const r = parsePin(raw, { board_slug });\n  const pin_url = r.pin_url || extractPinUrl(raw);\n  const pin_id = (String(pin_url).match(/\\/pin\\/(\\d+)/) || [])[1] || '';\n\n  if (!pin_id) { rejected.no_pin_id = (rejected.no_pin_id || 0) + 1; continue; }\n\n  const cands = r.ok && r.image_candidates.length\n    ? r.image_candidates\n    : imageCandidates(extractImage(raw));\n  if (!cands.length) { rejected.no_image = (rejected.no_image || 0) + 1; continue; }\n\n  rows.push({ json: {\n    _kind: 'pin',\n    pin_id,\n    pin_url,\n    board_slug,\n    title: r.ok ? r.title : cleanText(raw.title),\n    description: r.ok ? r.description\n      : cleanText(raw.description || raw.content || raw['content:encoded'] || ''),\n    image_url: cands[0],\n    image_candidates: JSON.stringify(cands),\n    // A feed that *does* carry the link skips the resolve step entirely.\n    etsy_listing_id: r.ok ? r.etsy_listing_id : '',\n    resolve_status: r.ok ? 'ok' : 'new',\n    resolve_error: '',\n    resolve_attempts: 0,\n    first_seen_at: now,\n    resolved_at: r.ok ? now : null,\n  } });\n}\n\nif (feedError) {\n  return [{ json: {\n    _kind: 'log',\n    workflow: 'A - Sync Boards',\n    level: 'error',\n    context: `board=${board_slug} url=${rss_url}`,\n    message: `Feed fetch failed: ${feedError}`,\n    created_at: now,\n  } }];\n}\n\nconst summary = {\n  _kind: 'log',\n  workflow: 'A - Sync Boards',\n  level: rows.length ? 'info' : 'warn',\n  context: `board=${board_slug}`,\n  message: `feed_items=${total} usable_pins=${rows.length}`\n    + (Object.keys(rejected).length ? ` rejected=${JSON.stringify(rejected)}` : ''),\n  created_at: now,\n};\n\nreturn rows.length ? [...rows, { json: summary }] : [{ json: summary }];\n"
+        }
+      },
+      {
+        "id": "if-kind",
+        "name": "Pin Or Log?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1980,
+          -120
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._kind }}",
+                "rightValue": "pin",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-newpins",
+        "name": "New Pins Only",
+        "notes": "Passes through only pins we have never seen, so an already-resolved pin is never reset to status=new. No alwaysOutputData: zero new pins must mean zero inserts, not one blank row.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          2200,
+          -220
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "rowNotExists",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "HBshV0j15En0ZX6S"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "pin_id",
+                "condition": "eq",
+                "keyValue": "={{ $json.pin_id }}"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "dt-insertpin",
+        "name": "Insert Pin",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          2420,
+          -220
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "HBshV0j15En0ZX6S"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "pin_id": "={{ $json.pin_id }}",
+              "pin_url": "={{ $json.pin_url }}",
+              "board_slug": "={{ $json.board_slug }}",
+              "title": "={{ $json.title }}",
+              "description": "={{ $json.description }}",
+              "image_url": "={{ $json.image_url }}",
+              "image_candidates": "={{ $json.image_candidates }}",
+              "etsy_listing_id": "={{ $json.etsy_listing_id }}",
+              "resolve_status": "={{ $json.resolve_status }}",
+              "resolve_error": "={{ $json.resolve_error }}",
+              "resolve_attempts": "={{ $json.resolve_attempts }}",
+              "first_seen_at": "={{ $json.first_seen_at }}",
+              "resolved_at": "={{ $json.resolved_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {
+            "optimizeBulk": true
+          }
+        }
+      },
+      {
+        "id": "dt-noboards",
+        "name": "Write No Boards Log",
+        "notes": "Only reached when the boards table has nothing usable. Phase 2 still runs, since pins may be waiting from an earlier sync.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          1300,
+          40
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "={{ $json.workflow }}",
+              "level": "={{ $json.level }}",
+              "context": "={{ $json.context }}",
+              "message": "={{ $json.message }}",
+              "created_at": "={{ $json.created_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      },
+      {
+        "id": "dt-boardlog",
+        "name": "Write Board Log",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          2200,
+          20
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "={{ $json.workflow }}",
+              "level": "={{ $json.level }}",
+              "context": "={{ $json.context }}",
+              "message": "={{ $json.message }}",
+              "created_at": "={{ $json.created_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      },
+      {
+        "id": "dt-touch",
+        "name": "Touch Board",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          1760,
+          -320
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "eHP9QfDm4Ay8F0HE"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "board_slug",
+                "condition": "eq",
+                "keyValue": "={{ $json.board_slug }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "last_synced_at": "={{ $json.last_synced_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "sn-phase2",
+        "name": "Sticky Note2",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          1280,
+          240
+        ],
+        "parameters": {
+          "width": 500,
+          "height": 240,
+          "color": 5,
+          "content": "### Phase 2 - recover the Etsy link\n\nPinterest RSS carries no outbound link, so it is read from the pin page,\nwhere Pinterest embeds it in hydration JSON.\n\nEach page is ~1MB, so only `resolve_status=new` pins are fetched, capped\nby `PIN_RESOLVE_MAX_PER_RUN` and spaced by `RESOLVE_THROTTLE_MS`.\n`ok`, `not_etsy` and `failed` are terminal - never re-fetched."
+        }
+      },
+      {
+        "id": "dt-pending",
+        "name": "Load Pending Pins",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          1540,
+          380
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "HBshV0j15En0ZX6S"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "resolve_status",
+                "condition": "eq",
+                "keyValue": "new"
+              }
+            ]
+          },
+          "returnAll": true
+        }
+      },
+      {
+        "id": "cd-pending",
+        "name": "Pins To Resolve",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1760,
+          380
+        ],
+        "parameters": {
+          "jsCode": "// Phase 2 gate: decide which pins get their page fetched this run.\n//\n// Each pin page is ~1MB, so this is the throttle that keeps a sync from\n// turning into a scrape. Only pins with resolve_status='new' are candidates;\n// 'ok', 'not_etsy' and 'failed' are terminal. Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst rows = $input.all()\n  .map((i) => i.json || {})\n  .filter((r) => r.pin_id && r.resolve_status === 'new');\n\nif (!rows.length) {\n  return [{ json: { _kind: 'none',\n    message: 'No pins awaiting resolution - every known pin is already '\n           + 'resolved, parked as not_etsy, or failed past its retry limit.' } }];\n}\n\n// Oldest first, so a backlog drains in the order pins were discovered.\nrows.sort((a, b) => String(a.first_seen_at || '').localeCompare(String(b.first_seen_at || '')));\n\nreturn rows.slice(0, cfg._resolve_max).map((r) => ({ json: {\n  pin_id: String(r.pin_id),\n  pin_url: String(r.pin_url || ''),\n  board_slug: String(r.board_slug || ''),\n  title: String(r.title || ''),\n  description: String(r.description || ''),\n  image_url: String(r.image_url || ''),\n  image_candidates: r.image_candidates || '[]',\n  resolve_attempts: Number(r.resolve_attempts) || 0,\n  resolved_at: r.resolved_at || null,\n  etsy_listing_id: String(r.etsy_listing_id || ''),\n} }));\n"
+        }
+      },
+      {
+        "id": "if-resolve",
+        "name": "Anything To Resolve?",
+        "notes": "TRUE branch means nothing to do - skip straight to the summary.",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1980,
+          380
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._kind }}",
+                "rightValue": "none",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "http-pin",
+        "name": "Fetch Pin Page",
+        "notes": "Browser-like headers; neverError so a 403/429 is recorded, not fatal.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 5000,
+        "onError": "continueRegularOutput",
+        "position": [
+          2200,
+          480
+        ],
+        "parameters": {
+          "url": "={{ $json.pin_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              },
+              {
+                "name": "Accept",
+                "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+              },
+              {
+                "name": "Accept-Language",
+                "value": "en-US,en;q=0.9"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 25000,
+            "redirect": {
+              "redirect": {
+                "followRedirects": true,
+                "maxRedirects": 5
+              }
+            },
+            "batching": {
+              "batch": {
+                "batchSize": 1,
+                "batchInterval": "={{ $('Config').first().json._throttle_ms }}"
+              }
+            },
+            "response": {
+              "response": {
+                "responseFormat": "text",
+                "outputPropertyName": "data",
+                "neverError": true,
+                "fullResponse": true
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "cd-resolve",
+        "name": "Resolve Pin Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2420,
+          480
+        ],
+        "parameters": {
+          "jsCode": "/**\n * Pinterest pin -> Etsy listing extraction.\n *\n * This is the ONLY place that knows Pinterest exists. It is kept as a plain\n * module so it can be unit-tested outside n8n; the same body is pasted into\n * Workflow A's \"Parse Pins\" Code node.\n *\n * Contract (the isolation boundary the rest of the system depends on):\n *   input : a raw RSS item object from the RSS Feed Read node\n *   output: { ok: true, etsy_listing_id, etsy_url, title, description,\n *             image_url, image_candidates, pin_url }\n *        or { ok: false, reason, pin_url }\n *\n * Workflows B/C/D never see a field from this file other than the ones above,\n * and key off etsy_listing_id. Swapping in the Etsy API later means replacing\n * this file and nothing else.\n */\n\n// ---------------------------------------------------------------- HTML text\n\nconst ENTITIES = {\n  amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n  hellip: '…', mdash: '—', ndash: '–', rsquo: '’',\n  lsquo: '‘', ldquo: '“', rdquo: '”', middot: '·',\n  eacute: 'é', trade: '™', reg: '®', copy: '©',\n};\n\nfunction decodeEntities(s) {\n  return String(s || '')\n    .replace(/&#x([0-9a-f]+);/gi, (_, h) => safeCodePoint(parseInt(h, 16)))\n    .replace(/&#(\\d+);/g, (_, d) => safeCodePoint(parseInt(d, 10)))\n    .replace(/&([a-z]+);/gi, (m, name) => {\n      const k = name.toLowerCase();\n      return Object.prototype.hasOwnProperty.call(ENTITIES, k) ? ENTITIES[k] : m;\n    });\n}\n\nfunction safeCodePoint(n) {\n  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';\n  try { return String.fromCodePoint(n); } catch { return ''; }\n}\n\n// Pinterest boilerplate that adds nothing to a Facebook caption.\nconst BOILERPLATE = [\n  /\\b(?:this|these)\\s+pins?\\s+(?:was|were)\\s+discovered\\s+by[^.]*\\.?/i,\n  /\\bdiscover\\s+\\(and\\s+save!?\\)\\s+your\\s+own\\s+pins\\s+on\\s+pinterest\\.?/i,\n  /\\bfind\\s+this\\s+pin\\s+and\\s+more\\s+on\\s+[^.|]*\\s+by\\s+[^.|]*\\.?/i,\n  /\\bsaved?\\s+(from|to)\\s+pinterest\\.?/i,\n  /\\bmore\\s+ideas\\s+about\\s+[^.]*\\./i,\n  /\\bclick\\s+(the\\s+)?link\\s+(in\\s+bio|to\\s+(shop|buy|view))\\b[^.]*\\.?/i,\n  /\\bvisit\\s+(my|our)\\s+(etsy\\s+)?shop\\s+for\\s+more\\b[^.]*\\.?/i,\n];\n\n/** Strip tags, decode entities, drop boilerplate, collapse whitespace. */\nfunction cleanText(html) {\n  let s = String(html == null ? '' : html);\n  s = s.replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n       .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ');\n  // Keep paragraph/line structure before tags are removed.\n  s = s.replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/p>/gi, '\\n\\n');\n  s = s.replace(/<[^>]*>/g, ' ');\n  s = decodeEntities(s);\n  // A bare Pinterest/Etsy URL left in the body is noise; the link is appended\n  // deliberately at the end of the caption by Workflow B.\n  s = s.replace(/https?:\\/\\/(www\\.)?(pinterest\\.[a-z.]+|pin\\.it|etsy\\.com)\\/\\S*/gi, ' ');\n  for (const re of BOILERPLATE) s = s.replace(re, ' ');\n  s = s.replace(/[ \\t ]+/g, ' ')\n       .replace(/ ?\\n ?/g, '\\n')\n       .replace(/\\n{3,}/g, '\\n\\n')\n       .trim();\n  return s;\n}\n\n// ---------------------------------------------------------------- Etsy link\n\n/**\n * Etsy listing URLs we accept:\n *   https://www.etsy.com/listing/1234567890/slug?utm_source=...\n *   https://etsy.com/listing/1234567890\n *   https://www.etsy.com/il-en/listing/1234567890/slug   (locale prefix)\n *   https://www.etsy.com/shop/X/listing/1234567890/slug\n * Rejected: anything without a /listing/{digits} segment.\n */\nconst ETSY_LISTING_RE = /https?:\\/\\/(?:[a-z0-9-]+\\.)?etsy\\.com\\/(?:[a-z]{2}-[a-z]{2}\\/)?(?:[^\\s\"'<>?#]*\\/)?listing\\/(\\d{6,15})(?:[\\/?#][^\\s\"'<>]*)?/i;\n\n/** Pinterest wraps outbound links in a redirector; unwrap before matching. */\nfunction unwrapRedirect(url) {\n  const s = String(url || '');\n  const m = s.match(/[?&](?:url|u|redirect|target|dest)=([^&]+)/i);\n  if (!m) return s;\n  try {\n    const inner = decodeURIComponent(m[1]);\n    if (/^https?:\\/\\//i.test(inner)) return inner;\n  } catch { /* malformed escape - fall through */ }\n  return s;\n}\n\n/** Collect every plausible URL from an RSS item, in order of trustworthiness. */\nfunction linkCandidates(item) {\n  const out = [];\n  const push = (v) => { if (v && typeof v === 'string') out.push(v); };\n\n  push(item.link);\n  push(item.guid && (item.guid._ || item.guid.value || item.guid));\n  push(item.id);\n  // Some feeds put the outbound URL in an enclosure or a namespaced field.\n  if (item.enclosure && item.enclosure.url) push(item.enclosure.url);\n  push(item['pinterest:link']);\n\n  const html = [\n    item.description,\n    item.content,\n    item['content:encoded'],\n    item.contentSnippet,\n    item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Every href/src in the HTML, plus any bare URL in the text.\n  for (const m of html.matchAll(/(?:href|src)\\s*=\\s*[\"']([^\"']+)[\"']/gi)) push(m[1]);\n  for (const m of html.matchAll(/https?:\\/\\/[^\\s\"'<>)]+/gi)) push(m[0]);\n\n  return out.map(unwrapRedirect);\n}\n\n/** First Etsy listing link found, normalized. null when the pin has none. */\nfunction extractEtsy(item) {\n  for (const cand of linkCandidates(item)) {\n    const m = String(cand).match(ETSY_LISTING_RE);\n    if (m) {\n      const id = m[1];\n      return { etsy_listing_id: id, etsy_url: `https://www.etsy.com/listing/${id}` };\n    }\n  }\n  return null;\n}\n\n// ------------------------------------------------------------------- images\n\n/**\n * Pinterest serves the same image at several sizes under a size segment:\n *   https://i.pinimg.com/236x/ab/cd/ef/abcdef123.jpg\n *   https://i.pinimg.com/originals/ab/cd/ef/abcdef123.jpg\n * /originals/ is the largest but does not always exist (and can carry a\n * different extension), so return an ordered candidate list. Workflow A\n * HEAD-checks them and stores the first that actually loads.\n */\nconst PINIMG_SIZE_RE = /^(https?:\\/\\/i\\.pinimg\\.com\\/)([^/]+)(\\/.+)$/i;\nconst SIZE_PREFERENCE = ['originals', '1200x', '736x', '564x', '474x', '236x'];\n\nfunction imageCandidates(url) {\n  const s = String(url || '').trim();\n  if (!s) return [];\n  const m = s.match(PINIMG_SIZE_RE);\n  if (!m) return [s];\n  const [, host, currentSize, path] = m;\n  const out = [];\n  for (const size of SIZE_PREFERENCE) {\n    out.push(`${host}${size}${path}`);\n    // /originals/ frequently stores a .png or .webp where the thumb was .jpg.\n    if (size === 'originals') {\n      const swapped = path.replace(/\\.(jpe?g)$/i, '.png');\n      if (swapped !== path) out.push(`${host}${size}${swapped}`);\n    }\n  }\n  if (!SIZE_PREFERENCE.includes(currentSize.toLowerCase())) out.push(s);\n  // De-duplicate, preserve order, and always keep the original as last resort.\n  const seen = new Set();\n  const uniq = out.filter((u) => !seen.has(u) && seen.add(u));\n  if (!uniq.includes(s)) uniq.push(s);\n  return uniq;\n}\n\n/** Pull the pin image out of an RSS item. */\nfunction extractImage(item) {\n  const html = [\n    item.description, item.content, item['content:encoded'], item.summary,\n  ].filter(Boolean).join(' ');\n\n  // Prefer a real media field when the feed provides one.\n  const media = item['media:content'] || item['media:thumbnail'];\n  const mediaUrl = media && (media.url || (media.$ && media.$.url));\n  if (mediaUrl) return String(mediaUrl);\n  if (item.enclosure && item.enclosure.url && /^image\\//i.test(item.enclosure.type || 'image/')) {\n    return String(item.enclosure.url);\n  }\n\n  const img = html.match(/<img[^>]+src\\s*=\\s*[\"']([^\"']+)[\"']/i);\n  if (img) return img[1];\n  const bare = html.match(/https?:\\/\\/i\\.pinimg\\.com\\/[^\\s\"'<>)]+\\.(?:jpe?g|png|webp)/i);\n  return bare ? bare[0] : '';\n}\n\n/** The pin's own Pinterest URL, for the pin_urls audit trail. */\nfunction extractPinUrl(item) {\n  const cands = [\n    item.guid && (item.guid._ || item.guid.value || item.guid),\n    item.link,\n    item.id,\n  ].filter((v) => typeof v === 'string');\n  for (const c of cands) {\n    const m = c.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n    if (m) return m[0];\n  }\n  const html = [item.description, item.content, item['content:encoded']]\n    .filter(Boolean).join(' ');\n  const m = html.match(/https?:\\/\\/(?:[a-z0-9-]+\\.)?pinterest\\.[a-z.]+\\/pin\\/\\d+/i);\n  return m ? m[0] : '';\n}\n\n// ------------------------------------------------------------------- public\n\nfunction parsePin(item, opts = {}) {\n  const pin_url = extractPinUrl(item);\n  const etsy = extractEtsy(item);\n  if (!etsy) {\n    return { ok: false, reason: 'no_etsy_link', pin_url,\n             title: cleanText(item.title).slice(0, 120) };\n  }\n  const rawImage = extractImage(item);\n  const cands = imageCandidates(rawImage);\n  const title = cleanText(item.title);\n  const description = cleanText(\n    item.description || item.content || item['content:encoded'] || item.summary || ''\n  );\n  if (!cands.length) {\n    return { ok: false, reason: 'no_image', pin_url, title,\n             etsy_listing_id: etsy.etsy_listing_id };\n  }\n  return {\n    ok: true,\n    etsy_listing_id: etsy.etsy_listing_id,\n    etsy_url: etsy.etsy_url,\n    title,\n    description,\n    image_url: cands[0],          // provisional; HEAD-verified downstream\n    image_candidates: cands,\n    pin_url,\n    board_slug: opts.board_slug || '',\n  };\n}\n\n/**\n * Pin page -> destination (Etsy) URL.\n *\n * Pinterest's board RSS does not publish a pin's outbound link (verified\n * against a real board: 26/26 pins had no destination URL anywhere in the\n * feed). The link only exists on the pin page itself, inside the embedded\n * JSON blob Pinterest ships for client-side hydration.\n *\n * Part of the Pinterest source layer. Everything here disappears if the\n * source is later swapped for the Etsy API.\n */\n\n// ETSY_LISTING_RE is provided by the inlined pin-parser above.\n\n/** Pin id from any pinterest pin URL form. */\nfunction pinId(url) {\n  const m = String(url || '').match(/\\/pin\\/(\\d+)/);\n  return m ? m[1] : '';\n}\n\n/**\n * Pinterest ships the pin's outbound URL under several JSON keys depending on\n * which renderer served the page. Ordered most- to least-specific; the first\n * that yields an Etsy listing wins.\n */\nconst JSON_LINK_KEYS = [\n  'link',            // canonical destination on the Pin object\n  'tracked_link',    // click-tracking wrapper, still contains the target\n  'domain_url',\n  'seo_canonical_url',\n];\n\n/**\n * Extract every plausible destination URL from a pin page's HTML.\n * Returns them in confidence order; callers pick the first Etsy listing.\n *\n * Works on the raw HTML string - no DOM, no browser. JSON string values are\n * escaped (\\/), so unescape before matching.\n */\nfunction destinationCandidates(html) {\n  const s = String(html || '');\n  const out = [];\n  const push = (v) => {\n    if (!v) return;\n    const u = String(v).replace(/\\\\u002F/gi, '/').replace(/\\\\\\//g, '/').trim();\n    if (/^https?:\\/\\//i.test(u)) out.push(u);\n  };\n\n  // 1. Explicit JSON keys, e.g.  \"link\":\"https:\\/\\/www.etsy.com\\/listing\\/123\"\n  for (const key of JSON_LINK_KEYS) {\n    const re = new RegExp(`\"${key}\"\\\\s*:\\\\s*\"((?:[^\"\\\\\\\\]|\\\\\\\\.)*)\"`, 'gi');\n    for (const m of s.matchAll(re)) push(m[1]);\n  }\n\n  // 2. og:see_also / canonical-style meta tags sometimes carry the target.\n  for (const m of s.matchAll(\n    /<meta[^>]+(?:property|name)\\s*=\\s*[\"'](?:og:see_also|pinterest:link)[\"'][^>]+content\\s*=\\s*[\"']([^\"']+)[\"']/gi\n  )) push(m[1]);\n\n  // 3. Last resort: any Etsy listing URL anywhere in the document, including\n  //    inside escaped JSON. This is what actually survives Pinterest's\n  //    frequent renderer changes.\n  for (const m of s.matchAll(/https?:(?:\\\\u002F|\\\\\\/|\\/){2}(?:[a-z0-9-]+\\.)?etsy\\.com(?:\\\\u002F|\\\\\\/|\\/)[^\"'\\s<>\\\\]*(?:(?:\\\\u002F|\\\\\\/|\\/)[^\"'\\s<>\\\\]*)*/gi)) {\n    push(m[0]);\n  }\n\n  const seen = new Set();\n  return out.filter((u) => !seen.has(u) && seen.add(u));\n}\n\n/**\n * Resolve a pin page's HTML to an Etsy listing.\n * @returns {{ok:true, etsy_listing_id, etsy_url}|{ok:false, reason, diagnostics}}\n */\nfunction resolveEtsyFromHtml(html, opts = {}) {\n  const s = String(html || '');\n  const diagnostics = diagnose(s);\n\n  for (const cand of destinationCandidates(s)) {\n    const m = cand.match(ETSY_LISTING_RE);\n    if (m) {\n      return {\n        ok: true,\n        etsy_listing_id: m[1],\n        etsy_url: `https://www.etsy.com/listing/${m[1]}`,\n        matched_from: cand.slice(0, 200),\n      };\n    }\n  }\n\n  // A non-Etsy destination is a legitimate outcome (pin points elsewhere),\n  // and must be distinguished from \"Pinterest blocked us\".\n  const anyDest = destinationCandidates(s).find((u) => !/pinterest\\.|pinimg\\./i.test(u));\n  return {\n    ok: false,\n    reason: diagnostics.looks_blocked ? 'blocked_or_login_wall'\n      : anyDest ? 'destination_not_etsy'\n      : 'no_destination_found',\n    sample_destination: anyDest ? anyDest.slice(0, 200) : '',\n    diagnostics,\n    pin_url: opts.pin_url || '',\n  };\n}\n\n/** Cheap signals for telling a real pin page from a bot wall. */\nfunction diagnose(html) {\n  const s = String(html || '');\n  return {\n    html_bytes: s.length,\n    has_pws_data: /__PWS_(?:DATA|INITIAL_PROPS)__/.test(s),\n    has_pin_json: /\"pin\"\\s*:\\s*\\{|\"objectType\"\\s*:\\s*\"pin\"/i.test(s),\n    mentions_etsy: /etsy\\.com/i.test(s),\n    looks_blocked:\n      s.length < 20000\n      || /captcha|are you a robot|unusual traffic/i.test(s)\n      || (/log ?in to (?:see|continue)/i.test(s) && !/__PWS_/.test(s)),\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Phase 2: turn fetched pin pages into `pins` row updates.\n//\n// Input: one item per fetched pin page (HTTP Request, responseFormat=text,\n// fullResponse, neverError). Pairing back to the pin is done by index, which\n// is safe because the HTTP node emits exactly one item per input item.\n// Mode: Run Once for All Items.\n\nconst pending = $('Pins To Resolve').all().map((i) => i.json);\nconst cfg = $('Config').first().json;\nconst maxAttempts = cfg._resolve_max_attempts;\nconst now = new Date().toISOString();\n\nconst out = [];\nconst all = $input.all();\n\nfor (let i = 0; i < all.length; i++) {\n  const j = all[i].json || {};\n  const pin = pending[i] || {};\n  const pin_id = pin.pin_id || '';\n  const attempts = (Number(pin.resolve_attempts) || 0) + 1;\n\n  const html = typeof j.data === 'string' ? j.data\n    : typeof j.body === 'string' ? j.body : '';\n  const status = j.statusCode ?? null;\n\n  let update;\n  if (!html) {\n    update = {\n      resolve_status: attempts >= maxAttempts ? 'failed' : 'new',\n      resolve_error: `empty response (http ${status ?? 'n/a'})`,\n    };\n  } else {\n    const r = resolveEtsyFromHtml(html, { pin_url: pin.pin_url });\n    if (r.ok) {\n      update = {\n        etsy_listing_id: r.etsy_listing_id,\n        resolve_status: 'ok',\n        resolve_error: '',\n        resolved_at: now,\n      };\n    } else if (r.reason === 'destination_not_etsy') {\n      // A pin pointing somewhere other than Etsy is a permanent outcome, not\n      // a failure to retry.\n      update = { resolve_status: 'not_etsy', resolve_error: r.sample_destination || '' };\n    } else {\n      update = {\n        resolve_status: attempts >= maxAttempts ? 'failed' : 'new',\n        resolve_error: `${r.reason} (http ${status ?? 'n/a'}, `\n          + `${r.diagnostics?.html_bytes ?? 0} bytes)`,\n      };\n    }\n  }\n\n  out.push({ json: {\n    pin_id,\n    pin_url: pin.pin_url || '',\n    board_slug: pin.board_slug || '',\n    resolve_attempts: attempts,\n    etsy_listing_id: update.etsy_listing_id ?? (pin.etsy_listing_id || ''),\n    resolved_at: update.resolved_at ?? pin.resolved_at ?? null,\n    resolve_status: update.resolve_status,\n    resolve_error: String(update.resolve_error || '').slice(0, 500),\n    http_status: status,\n  } });\n}\n\nreturn out;\n"
+        }
+      },
+      {
+        "id": "dt-updatepin",
+        "name": "Update Pin",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          2640,
+          480
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "HBshV0j15En0ZX6S"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "pin_id",
+                "condition": "eq",
+                "keyValue": "={{ $json.pin_id }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "etsy_listing_id": "={{ $json.etsy_listing_id }}",
+              "resolve_status": "={{ $json.resolve_status }}",
+              "resolve_error": "={{ $json.resolve_error }}",
+              "resolve_attempts": "={{ $json.resolve_attempts }}",
+              "resolved_at": "={{ $json.resolved_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "cd-group",
+        "name": "Group By Listing",
+        "notes": "One item per Etsy listing, board_slugs merged - never a duplicate.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2860,
+          480
+        ],
+        "parameters": {
+          "jsCode": "// Phase 3: collapse resolved pins into one work item per Etsy listing.\n//\n// A listing pinned on several boards must produce ONE items row carrying all\n// its board_slugs, never a duplicate per board - that is the whole point of\n// keying on etsy_listing_id. Mode: Run Once for All Items.\n\nconst byListing = new Map();\n\nfor (const item of $input.all()) {\n  const p = item.json || {};\n  if (p.resolve_status !== 'ok' || !p.etsy_listing_id) continue;\n\n  const id = String(p.etsy_listing_id);\n  const cur = byListing.get(id) || {\n    etsy_listing_id: id,\n    etsy_url: `https://www.etsy.com/listing/${id}`,\n    title: '',\n    description: '',\n    image_url: '',\n    image_candidates: [],\n    board_slugs: [],\n    pin_urls: [],\n  };\n\n  // Prefer the richest text across the pins pointing at this listing.\n  const t = String(p.title || '');\n  const d = String(p.description || '');\n  if (t.length > cur.title.length) cur.title = t;\n  if (d.length > cur.description.length) cur.description = d;\n\n  if (!cur.image_url && p.image_url) cur.image_url = String(p.image_url);\n  if (!cur.image_candidates.length && p.image_candidates) {\n    try {\n      const c = typeof p.image_candidates === 'string'\n        ? JSON.parse(p.image_candidates) : p.image_candidates;\n      if (Array.isArray(c)) cur.image_candidates = c;\n    } catch { /* keep empty; image_url still set */ }\n  }\n  if (p.board_slug && !cur.board_slugs.includes(p.board_slug)) cur.board_slugs.push(p.board_slug);\n  if (p.pin_url && !cur.pin_urls.includes(p.pin_url)) cur.pin_urls.push(p.pin_url);\n\n  byListing.set(id, cur);\n}\n\nconst out = [...byListing.values()];\nif (!out.length) {\n  return [{ json: { _kind: 'none', message: 'No newly resolved listings this run.' } }];\n}\n\n// Expose an explicit candidate ladder for the HEAD-check chain downstream.\n//\n// Measured against real pins: /originals/*.jpg often 403s (hotlink\n// protection, or the original is simply a PNG), /originals/*.png returns the\n// true original (~850KB), and /1200x/ and /736x/ are byte-identical\n// (~110KB). So three checks are worth making; the fourth is the safety net.\n// Gaps are filled with the last known candidate so every slot is a real URL.\nreturn out.map((v) => {\n  const c = v.image_candidates.length ? v.image_candidates : [v.image_url].filter(Boolean);\n  const at = (i) => c[i] || c[c.length - 1] || v.image_url || '';\n  return { json: { _kind: 'listing', ...v,\n    image_c1: at(0),\n    image_c2: at(1),\n    image_c3: at(2),\n    image_c4: at(3),\n  } };\n});\n"
+        }
+      },
+      {
+        "id": "if-listings",
+        "name": "Have Listings?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3080,
+          480
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._kind }}",
+                "rightValue": "listing",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "loop-listings",
+        "name": "Loop Listings",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          3300,
+          380
+        ],
+        "parameters": {
+          "batchSize": 1,
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-getitem",
+        "name": "Get Existing Item",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          3520,
+          480
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "JaT1fvUeN6R77Pg2"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "etsy_listing_id",
+                "condition": "eq",
+                "keyValue": "={{ $json.etsy_listing_id }}"
+              }
+            ]
+          },
+          "returnAll": false,
+          "limit": 1
+        }
+      },
+      {
+        "id": "cd-merge",
+        "name": "Merge Item",
+        "notes": "Additive merge of board_slugs and pin_urls onto any existing row.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3740,
+          480
+        ],
+        "parameters": {
+          "jsCode": "// Phase 3: merge this listing with the items row that may already exist.\n//\n// Data tables have no UNIQUE constraint, so \"never create a duplicate\" is\n// enforced here plus the upsert filter on etsy_listing_id. Merging is additive:\n// a listing pinned on a new board gains that slug and keeps the old ones.\n// Mode: Run Once for All Items.\n\nconst listing = $('Loop Listings').first().json;\nconst now = new Date().toISOString();\n\n// \"Get Existing Item\" has alwaysOutputData, so a miss arrives as an item with\n// no etsy_listing_id rather than as zero items.\nconst existingRows = $input.all()\n  .map((i) => i.json || {})\n  .filter((r) => r.etsy_listing_id);\nconst existing = existingRows[0] || null;\n\nconst parseList = (v) => {\n  if (Array.isArray(v)) return v;\n  if (typeof v === 'string' && v.trim()) {\n    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }\n  }\n  return [];\n};\n\nconst mergeUnique = (a, b) => {\n  const out = [];\n  const seen = new Set();\n  for (const v of [...a, ...b]) {\n    const s = String(v || '').trim();\n    if (s && !seen.has(s)) { seen.add(s); out.push(s); }\n  }\n  return out;\n};\n\nconst board_slugs = mergeUnique(parseList(existing?.board_slugs), listing.board_slugs);\nconst pin_urls = mergeUnique(parseList(existing?.pin_urls), listing.pin_urls);\n\nreturn [{ json: {\n  row_id: existing?.id ?? null,\n  is_new: !existing,\n  etsy_listing_id: listing.etsy_listing_id,\n  etsy_url: listing.etsy_url,\n  // Keep existing text if the new pin has less to say.\n  title: (listing.title || '').length > String(existing?.title || '').length\n    ? listing.title : String(existing?.title || ''),\n  description: (listing.description || '').length > String(existing?.description || '').length\n    ? listing.description : String(existing?.description || ''),\n  board_slugs: JSON.stringify(board_slugs),\n  pin_urls: JSON.stringify(pin_urls),\n  first_seen_at: existing?.first_seen_at || now,\n  last_seen_at: now,\n  // Carried through for the image HEAD checks downstream.\n  image_c1: listing.image_c1,\n  image_c2: listing.image_c2,\n  image_c3: listing.image_c3,\n  image_c4: listing.image_c4,\n  existing_image_url: String(existing?.image_url || ''),\n} }];\n"
+        }
+      },
+      {
+        "id": "http-img1",
+        "name": "Verify Image 1",
+        "notes": "HEAD only - no body transferred.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          3960,
+          480
+        ],
+        "parameters": {
+          "method": "HEAD",
+          "url": "={{ $('Merge Item').first().json.image_c1 }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "http-img2",
+        "name": "Verify Image 2",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          4180,
+          480
+        ],
+        "parameters": {
+          "method": "HEAD",
+          "url": "={{ $('Merge Item').first().json.image_c2 }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "http-img3",
+        "name": "Verify Image 3",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          4400,
+          480
+        ],
+        "parameters": {
+          "method": "HEAD",
+          "url": "={{ $('Merge Item').first().json.image_c3 }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "cd-pick",
+        "name": "Pick Image",
+        "notes": "Highest resolution that answered 200.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4620,
+          480
+        ],
+        "parameters": {
+          "jsCode": "// Phase 3: choose the highest-resolution image URL that actually loads.\n//\n// Three HEAD checks run unconditionally - they carry no body, and newly\n// resolved listings are rare. Measured on real pins:\n//   /originals/*.jpg  often 403 (hotlink protection, or original is a PNG)\n//   /originals/*.png  200, the true original (~850KB)\n//   /1200x/*.jpg      200 (~110KB, byte-identical to /736x/)\n// Whichever answers 200 first wins. If none do we keep the last candidate\n// anyway: Workflow C can still publish it by downloading the bytes and\n// uploading them to Facebook as a file.\n// Mode: Run Once for All Items.\n\nconst merged = $('Merge Item').first().json;\n\nconst statusOf = (nodeName) => {\n  try {\n    return ($(nodeName).first().json || {}).statusCode ?? null;\n  } catch {\n    return null; // node did not run\n  }\n};\n\nconst ladder = [\n  { url: merged.image_c1, status: statusOf('Verify Image 1'), label: 'originals-jpg' },\n  { url: merged.image_c2, status: statusOf('Verify Image 2'), label: 'originals-png' },\n  { url: merged.image_c3, status: statusOf('Verify Image 3'), label: '1200x' },\n];\n\nconst hit = ladder.find((c) => c.status === 200 && c.url);\n\nconst image_url = hit ? hit.url\n  : (merged.image_c4 || merged.existing_image_url || merged.image_c1 || '');\n\nconst image_check = hit\n  ? `${hit.label} 200`\n  : ladder.map((c) => `${c.label} ${c.status ?? 'n/a'}`).join(', ')\n    + ' - unverified, Workflow C will upload the bytes instead';\n\nreturn [{ json: {\n  etsy_listing_id: merged.etsy_listing_id,\n  etsy_url: merged.etsy_url,\n  title: merged.title,\n  description: merged.description,\n  image_url,\n  board_slugs: merged.board_slugs,\n  pin_urls: merged.pin_urls,\n  first_seen_at: merged.first_seen_at,\n  last_seen_at: merged.last_seen_at,\n  _is_new: merged.is_new,\n  _image_check: image_check,\n} }];\n"
+        }
+      },
+      {
+        "id": "dt-upsertitem",
+        "name": "Upsert Item",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          4840,
+          480
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "upsert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "JaT1fvUeN6R77Pg2"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "etsy_listing_id",
+                "condition": "eq",
+                "keyValue": "={{ $json.etsy_listing_id }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "etsy_listing_id": "={{ $json.etsy_listing_id }}",
+              "etsy_url": "={{ $json.etsy_url }}",
+              "title": "={{ $json.title }}",
+              "description": "={{ $json.description }}",
+              "image_url": "={{ $json.image_url }}",
+              "board_slugs": "={{ $json.board_slugs }}",
+              "pin_urls": "={{ $json.pin_urls }}",
+              "first_seen_at": "={{ $json.first_seen_at }}",
+              "last_seen_at": "={{ $json.last_seen_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "cd-summary",
+        "name": "Sync Summary",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3520,
+          200
+        ],
+        "parameters": {
+          "jsCode": "// Final report for a sync run. Reads the phase nodes rather than recomputing,\n// and tolerates phases that did not run (no boards, nothing to resolve).\n// Mode: Run Once for All Items.\n\nconst safe = (name, fn, dflt) => {\n  try { return fn($(name).all().map((i) => i.json || {})); } catch { return dflt; }\n};\n\nconst boards = safe('Boards To Sync', (r) => r.filter((x) => x._kind === 'board'), []);\nconst resolved = safe('Resolve Pin Result', (r) => r, []);\nconst listings = safe('Group By Listing', (r) => r.filter((x) => x._kind === 'listing'), []);\nconst attempted = safe('Pins To Resolve', (r) => r.filter((x) => x._kind !== 'none'), []);\n\nconst byStatus = resolved.reduce((a, r) => {\n  const k = r.resolve_status || 'unknown';\n  a[k] = (a[k] || 0) + 1;\n  return a;\n}, {});\n\nreturn [{ json: {\n  workflow: 'A - Sync Boards',\n  finished_at: new Date().toISOString(),\n  boards_synced: boards.length,\n  boards: boards.map((b) => b.board_slug),\n  pins_resolve_attempted: attempted.length,\n  resolve_outcomes: byStatus,\n  listings_upserted: listings.length,\n  listings: listings.map((l) => ({\n    etsy_listing_id: l.etsy_listing_id,\n    title: String(l.title || '').slice(0, 70),\n  })),\n  note: attempted.length >= ($('Config').first().json._resolve_max || 10)\n    ? 'Hit PIN_RESOLVE_MAX_PER_RUN - more pins remain queued for the next run.'\n    : 'All known pins have been processed.',\n} }];\n"
+        }
+      },
+      {
+        "id": "dt-summarylog",
+        "name": "Write Summary Log",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          3740,
+          200
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "A - Sync Boards",
+              "level": "info",
+              "context": "=sync_summary",
+              "message": "={{ JSON.stringify($json) }}",
+              "created_at": "={{ $json.finished_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Every 6 Hours": {
+        "main": [
+          [
+            {
+              "node": "Load Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual Sync": {
+        "main": [
+          [
+            {
+              "node": "Load Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Config": {
+        "main": [
+          [
+            {
+              "node": "Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config": {
+        "main": [
+          [
+            {
+              "node": "Load Boards",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Boards": {
+        "main": [
+          [
+            {
+              "node": "Boards To Sync",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Boards To Sync": {
+        "main": [
+          [
+            {
+              "node": "Have Boards?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Have Boards?": {
+        "main": [
+          [
+            {
+              "node": "Loop Boards",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Write No Boards Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write No Boards Log": {
+        "main": [
+          [
+            {
+              "node": "Load Pending Pins",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Boards": {
+        "main": [
+          [
+            {
+              "node": "Load Pending Pins",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Current Board",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Current Board": {
+        "main": [
+          [
+            {
+              "node": "Touch Board",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Touch Board": {
+        "main": [
+          [
+            {
+              "node": "Read Board RSS",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Board RSS": {
+        "main": [
+          [
+            {
+              "node": "Parse Pins To Rows",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Pins To Rows": {
+        "main": [
+          [
+            {
+              "node": "Pin Or Log?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pin Or Log?": {
+        "main": [
+          [
+            {
+              "node": "New Pins Only",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Write Board Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "New Pins Only": {
+        "main": [
+          [
+            {
+              "node": "Insert Pin",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Insert Pin": {
+        "main": [
+          [
+            {
+              "node": "Loop Boards",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Board Log": {
+        "main": [
+          [
+            {
+              "node": "Loop Boards",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Pending Pins": {
+        "main": [
+          [
+            {
+              "node": "Pins To Resolve",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pins To Resolve": {
+        "main": [
+          [
+            {
+              "node": "Anything To Resolve?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Anything To Resolve?": {
+        "main": [
+          [
+            {
+              "node": "Sync Summary",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Fetch Pin Page",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Pin Page": {
+        "main": [
+          [
+            {
+              "node": "Resolve Pin Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Pin Result": {
+        "main": [
+          [
+            {
+              "node": "Update Pin",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Pin": {
+        "main": [
+          [
+            {
+              "node": "Group By Listing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Group By Listing": {
+        "main": [
+          [
+            {
+              "node": "Have Listings?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Have Listings?": {
+        "main": [
+          [
+            {
+              "node": "Loop Listings",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Sync Summary",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Listings": {
+        "main": [
+          [
+            {
+              "node": "Sync Summary",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Get Existing Item",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Existing Item": {
+        "main": [
+          [
+            {
+              "node": "Merge Item",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge Item": {
+        "main": [
+          [
+            {
+              "node": "Verify Image 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verify Image 1": {
+        "main": [
+          [
+            {
+              "node": "Verify Image 2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verify Image 2": {
+        "main": [
+          [
+            {
+              "node": "Verify Image 3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verify Image 3": {
+        "main": [
+          [
+            {
+              "node": "Pick Image",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pick Image": {
+        "main": [
+          [
+            {
+              "node": "Upsert Item",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upsert Item": {
+        "main": [
+          [
+            {
+              "node": "Loop Listings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sync Summary": {
+        "main": [
+          [
+            {
+              "node": "Write Summary Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Raf Arak",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-10-01T07:32:18.336Z",
+    "updatedAt": "2026-10-01T07:32:18.336Z",
+    "workflowPublishHistory": [
+      {
+        "id": 76,
+        "workflowId": "fwvz0DCV8qUgISNJ",
+        "versionId": "d4d44b60-f1fa-483d-9f19-e5ae4f56f45d",
+        "event": "activated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-01T07:33:00.576Z"
+      },
+      {
+        "id": 92,
+        "workflowId": "fwvz0DCV8qUgISNJ",
+        "versionId": "d4d44b60-f1fa-483d-9f19-e5ae4f56f45d",
+        "event": "deactivated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-01T10:48:10.226Z"
+      },
+      {
+        "id": 93,
+        "workflowId": "fwvz0DCV8qUgISNJ",
+        "versionId": "d4d44b60-f1fa-483d-9f19-e5ae4f56f45d",
+        "event": "activated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-01T10:48:10.226Z"
+      }
+    ]
+  }
+}

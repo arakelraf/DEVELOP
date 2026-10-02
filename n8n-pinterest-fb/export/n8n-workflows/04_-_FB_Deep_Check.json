@@ -1,0 +1,314 @@
+{
+  "id": "i9ytYfaimkRtVwbp",
+  "name": "04 - FB Deep Check",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-10-02T14:25:36.036Z",
+  "updatedAt": "2026-10-02T15:15:02.307Z",
+  "isArchived": false,
+  "versionId": "01612fe5-a7e7-4c21-bafe-259e2da8ee4f",
+  "versionCounter": 3,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "wh",
+      "name": "Deep Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fb-deep-check",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "webhookId": "1f66e039-b8a5-4e3e-be90-faf0cfe1a542"
+    },
+    {
+      "id": "me",
+      "name": "Me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        420,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/me",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      }
+    },
+    {
+      "id": "perm",
+      "name": "Permissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        420,
+        40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/me/permissions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      }
+    },
+    {
+      "id": "acc",
+      "name": "Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        420,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/me/accounts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name,tasks"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      }
+    },
+    {
+      "id": "pg",
+      "name": "Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        420,
+        340
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.facebook.com/v21.0/1378170695380729",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      }
+    },
+    {
+      "id": "rep",
+      "name": "Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Mode: Run Once for All Items. Names and counts only - no tokens.\nconst body=(n)=>{try{const j=$(n).first().json;return j&&j.body!==undefined?j.body:j;}catch{return null;}};\nconst status=(n)=>{try{return $(n).first().json.statusCode;}catch{return null;}};\nconst me=body('Me'), perm=body('Permissions'), acc=body('Accounts'), pg=body('Page');\nconst granted=(perm&&perm.data||[]).filter(p=>p.status==='granted').map(p=>p.permission);\nconst declined=(perm&&perm.data||[]).filter(p=>p.status!=='granted').map(p=>p.permission+':'+p.status);\nconst accErr=(acc&&acc.error)?(acc.error.type+' '+(acc.error.code||'')+': '+acc.error.message):null;\nreturn [{json:{\n  me_name:me&&me.name, me_id:me&&me.id,\n  granted_permissions:granted,\n  declined_or_missing:declined,\n  accounts_status:status('Accounts'),\n  accounts_error:accErr,\n  pages_count:(acc&&Array.isArray(acc.data))?acc.data.length:'n/a',\n  page_names:(acc&&acc.data||[]).map(p=>p.name),\n  page_tasks:(acc&&acc.data||[]).map(p=>({name:p.name,tasks:p.tasks})),\n  page_status:status('Page'),\n  page_direct:(pg&&pg.error)?('ERR '+pg.error.code+' '+pg.error.message):(pg&&pg.name),\n}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Deep Webhook": {
+      "main": [
+        [
+          {
+            "node": "Me",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Permissions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Me": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Permissions": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accounts": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "timezone": "Europe/Belgrade",
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "i9ytYfaimkRtVwbp",
+      "projectId": "ddGoL4iYjV8UejMn",
+      "project": {
+        "id": "ddGoL4iYjV8UejMn",
+        "name": "Raf Arak <rafaraksrb@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-09-30T15:35:08.876Z",
+        "updatedAt": "2026-09-30T15:37:26.910Z"
+      },
+      "createdAt": "2026-10-02T14:25:36.036Z",
+      "updatedAt": "2026-10-02T14:25:36.036Z"
+    }
+  ],
+  "activeVersion": null
+}

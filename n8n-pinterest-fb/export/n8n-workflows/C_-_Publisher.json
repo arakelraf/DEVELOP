@@ -1,0 +1,3320 @@
+{
+  "id": "5e40Xz6KQgc6ihqp",
+  "name": "C - Publisher",
+  "description": null,
+  "active": true,
+  "activeVersionId": "6a108c10-02a6-4017-b7e9-ac944a2068ce",
+  "createdAt": "2026-09-30T21:55:59.431Z",
+  "updatedAt": "2026-10-02T15:25:32.173Z",
+  "isArchived": false,
+  "versionId": "6a108c10-02a6-4017-b7e9-ac944a2068ce",
+  "versionCounter": 13,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "sn-c",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        -420
+      ],
+      "parameters": {
+        "width": 540,
+        "height": 430,
+        "color": 3,
+        "content": "## C - Publisher\n\nRuns every 30 minutes (:13 and :43) or on demand.\n\n**Scheduling is handed to Facebook.** A row more than 10 minutes out is\nsent with `published=false` + `scheduled_publish_time`, and Facebook\npublishes it at the slot, so n8n need not be awake at 10:00. A row\nwhose slot already arrived is published immediately, so nothing is\nlost to downtime.\n\n**Two ways to authenticate**, set by `AUTH_MODE` in config:\n\n`oauth` - open the *Facebook OAuth (login)* credential, paste App ID and\nSecret, click **Connect my account**; Facebook's own login window\nopens. Needs a redirect URI whitelisted in the Meta app.\n\n`token` - paste a long-lived **user** token into *Facebook User Token*.\nNo redirect URI needed; the Graph API Explorer issues one directly.\n\nEither way the run derives the **Page** token itself via\n`/me/accounts`, so nothing is copied twice and `FB_PAGE_ID` is\noptional when the account manages one Page.\n\n**DRY_RUN is ON by default.** Everything runs except the Facebook calls,\nand the exact request bodies land in `errors_log`. Set `DRY_RUN=false`\nin config when you are ready to post.\n\nStatus flow: `queued` -> `posting` (claimed) -> `scheduled` (accepted by\nFacebook) or `posted` (published now) / `failed` / `skipped`."
+      }
+    },
+    {
+      "id": "sn-c2",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        60
+      ],
+      "parameters": {
+        "width": 540,
+        "height": 310,
+        "color": 4,
+        "content": "### Double-post protection\n\n`Claim Row` updates the row **only if its status is still what we read**\n(both `id` and `status` must match). If another run got there first,\nzero rows change, `Verify Claim` sees no updated row, and this run\nstops without calling Facebook.\n\nThat is why the claim happens first, and why every HTTP node sits\nbehind it.\n\n### Image fallback\n\nThe photo is uploaded by URL first. If Facebook cannot fetch it\n(Pinterest hotlink protection), the bytes are downloaded in n8n and\nuploaded as a file instead."
+      }
+    },
+    {
+      "id": "trg-cron",
+      "name": "Every 30 Minutes",
+      "notes": "Off :00/:30 deliberately - those are the busiest scheduler minutes.",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -40,
+        -220
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "13,43 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "trg-manual",
+      "name": "Manual Publish",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -60
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "dt-config",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        200,
+        -140
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Fzx5awBGnmaDaffF"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// Flattens the config table into one object so later nodes can read settings\n// as $('Config').first().json.SLOTS instead of searching rows.\n// Defaults are applied for any key missing from the table, so the workflow\n// still runs on a fresh install. Mode: Run Once for All Items.\n\nconst DEFAULTS = {\n  TIMEZONE: 'Europe/Belgrade',\n  SLOTS: '10:00,15:00,20:00',\n  TEXT_MODE: 'pinterest',\n  REPOST_AFTER_DAYS: '60',\n  SCHEDULE_HORIZON_DAYS: '14',\n  MAX_QUEUE_PER_RUN: '60',\n  RETRY_DELAY_MINUTES: '30',\n  EXTRA_HASHTAGS: '',\n  POST_TEXT_MAX_CHARS: '600',\n  FB_PAGE_ID: '',\n  PIN_RESOLVE_MAX_PER_RUN: '10',\n  RESOLVE_THROTTLE_MS: '2000',\n  RESOLVE_MAX_ATTEMPTS: '3',\n  DRY_RUN: 'true',\n  MAX_PUBLISH_PER_RUN: '20',\n  FB_API_VERSION: 'v21.0',\n  AUTH_MODE: 'oauth',\n};\n\nconst cfg = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.key) cfg[String(r.key)] = r.value == null ? '' : String(r.value);\n}\n\n// Typed views, so consumers never re-parse strings.\ncfg._slots = String(cfg.SLOTS).split(',').map((s) => s.trim()).filter(Boolean);\ncfg._repost_after_days = Number(cfg.REPOST_AFTER_DAYS) || 0;\ncfg._resolve_max = Math.max(1, Number(cfg.PIN_RESOLVE_MAX_PER_RUN) || 10);\ncfg._throttle_ms = Math.max(0, Number(cfg.RESOLVE_THROTTLE_MS) || 0);\ncfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);\ncfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);\ncfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);\ncfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);\ncfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);\ncfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);\n// Anything but an explicit \"false\" keeps the safety on.\ncfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';\n// Anything other than an explicit \"token\" means the OAuth login path.\ncfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'\n  ? 'token' : 'oauth';\n\nreturn [{ json: cfg }];\n"
+      }
+    },
+    {
+      "id": "if-live",
+      "name": "Live Mode?",
+      "notes": "TRUE = really posting, so a Page token is needed. A dry run skips the Facebook calls entirely and needs no credential.",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._dry_run === false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "if-authmode",
+      "name": "OAuth Mode?",
+      "notes": "AUTH_MODE in config. oauth = the login credential; token = a pasted long-lived user token. Both end at Pick Page.",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        -320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $('Config').first().json._auth_mode }}",
+              "rightValue": "oauth",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-pages",
+      "name": "FB List Pages (OAuth)",
+      "notes": "Uses the Facebook login. Needs a redirect URI whitelisted in the Meta app.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        1060,
+        -440
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name,access_token"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gew3mnOJy0FEybxs",
+          "name": "Facebook OAuth (login)"
+        }
+      }
+    },
+    {
+      "id": "http-pages-tok",
+      "name": "FB List Pages (Token)",
+      "notes": "Uses a pasted long-lived USER token. No redirect URI needed - the Graph API Explorer issues one directly.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        1060,
+        -260
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name,access_token"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k62FLo1U37qyXxOk",
+          "name": "Facebook User Token"
+        }
+      }
+    },
+    {
+      "id": "cd-pickpage",
+      "name": "Pick Page",
+      "notes": "Chooses the Page (by FB_PAGE_ID, or the only one on the account) and keeps its token in memory for this execution only.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -350
+      ],
+      "parameters": {
+        "jsCode": "// Resolves the Page and its access token at run time.\n//\n// The OAuth credential holds a USER token (that is what the login dialog\n// grants). Posting to a Page needs a PAGE token, which /me/accounts derives\n// from it. Doing that on every run means:\n//   - no token is ever copied by hand or stored in the config table\n//   - a Page token derived from a long-lived user token does not expire\n//   - FB_PAGE_ID becomes optional when the account manages one Page\n// Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst mode = cfg._auth_mode; // 'oauth' | 'token'\n\n// The remedy differs per mode, so hints name the thing the user actually has.\nconst reconnect = mode === 'oauth'\n  ? 'Open Credentials -> \"Facebook OAuth (login)\", fill in App ID and App '\n    + 'Secret, then click \"Connect my account\" and approve the Facebook window.'\n  : 'Open Credentials -> \"Facebook User Token\" and paste a valid long-lived '\n    + 'USER token (Graph API Explorer gives you one; see '\n    + 'docs/facebook-page-token.md).';\nconst res = $input.first().json || {};\nconst body = res.body && typeof res.body === 'object' ? res.body : res;\nconst httpStatus = res.statusCode ?? null;\n\n// Two different failures arrive here and must not be conflated:\n//\n//  1. n8n could not even send the request - almost always because the OAuth\n//     credential has never been connected. The node then emits { error: ... }\n//     with no statusCode, and the error object often serializes to {}.\n//  2. Facebook answered with a Graph error, which has type/code/message.\nconst hasGraphError = body && body.error\n  && (body.error.message || body.error.type || body.error.code !== undefined);\n\nif (httpStatus == null && !hasGraphError) {\n  const raw = res.error ?? body?.error;\n  const detail = raw && (raw.message || raw.description || raw.reason);\n  return [{ json: {\n    ok: false,\n    stage: 'request_not_sent',\n    error: 'The call to /me/accounts never reached Facebook'\n      + (detail ? `: ${detail}` : '.'),\n    hint: `AUTH_MODE is \"${mode}\", and its credential is not usable yet. `\n        + reconnect + ' Re-run afterwards.',\n    http_status: null,\n  } }];\n}\n\nif (hasGraphError) {\n  const e = body.error;\n  const parts = [e.type || 'GraphError', e.code !== undefined ? `(${e.code})` : '']\n    .filter(Boolean).join(' ');\n  return [{ json: {\n    ok: false,\n    stage: 'me_accounts_failed',\n    error: `${parts}: ${e.message || 'no message returned'}`\n      + (e.error_user_msg ? ` - ${e.error_user_msg}` : ''),\n    hint: e.code === 190\n      ? 'The token has expired or been revoked. ' + reconnect\n      : 'Check that pages_show_list, pages_manage_posts and '\n        + 'pages_read_engagement were all granted. '\n        + (mode === 'token'\n          ? 'Note: this must be a USER token, not a Page token - /me/accounts '\n            + 'is what turns one into the other.'\n          : ''),\n    http_status: httpStatus,\n  } }];\n}\n\nconst pages = Array.isArray(body && body.data) ? body.data : [];\n\nif (!pages.length) {\n  return [{ json: {\n    ok: false,\n    stage: 'no_pages',\n    error: 'The logged-in account manages no Pages that this app can see.',\n    hint: 'You must be an admin of the Page, and the login must have granted '\n        + 'pages_show_list.',\n    http_status: httpStatus,\n  } }];\n}\n\nconst wanted = String(cfg.FB_PAGE_ID || '').trim();\nlet page = null;\n\nif (wanted) {\n  page = pages.find((p) => String(p.id) === wanted) || null;\n  if (!page) {\n    return [{ json: {\n      ok: false,\n      stage: 'page_id_not_found',\n      error: `FB_PAGE_ID is ${wanted}, but the logged-in account does not `\n        + 'manage a Page with that id.',\n      pages_available: pages.map((p) => ({ id: p.id, name: p.name })),\n      hint: 'Fix FB_PAGE_ID in the config table, or clear it if the account '\n          + 'manages exactly one Page.',\n      http_status: httpStatus,\n    } }];\n  }\n} else if (pages.length === 1) {\n  page = pages[0];\n} else {\n  return [{ json: {\n    ok: false,\n    stage: 'page_id_required',\n    error: `The account manages ${pages.length} Pages, so FB_PAGE_ID must say `\n      + 'which one to post to.',\n    pages_available: pages.map((p) => ({ id: p.id, name: p.name })),\n    http_status: httpStatus,\n  } }];\n}\n\nif (!page.access_token) {\n  return [{ json: {\n    ok: false,\n    stage: 'no_page_token',\n    error: `Page ${page.id} came back without an access_token.`,\n    hint: 'The login did not grant pages_manage_posts for this Page.',\n  } }];\n}\n\nreturn [{ json: {\n  ok: true,\n  page_id: String(page.id),\n  page_name: String(page.name || ''),\n  // Used as a request header by the publish nodes. Never written to a table.\n  page_token: String(page.access_token),\n  page_id_source: wanted ? 'config' : 'only_page_on_account',\n  auth_mode: mode,\n  pages_available: pages.length,\n} }];\n"
+      }
+    },
+    {
+      "id": "if-pageok",
+      "name": "Page Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        -350
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-authlog",
+      "name": "Log Auth Problem",
+      "notes": "Login or Page resolution failed. The message says which, and what to do.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1740,
+        -500
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "C - Publisher",
+            "level": "error",
+            "context": "=auth_problem",
+            "message": "={{ JSON.stringify($json) }}",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    },
+    {
+      "id": "dt-boards",
+      "name": "Load Boards",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        640,
+        -140
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "eHP9QfDm4Ay8F0HE"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "gt-boards",
+      "name": "Boards Loaded",
+      "notes": "Single-item gate - keeps the next table read from running N times.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "alwaysOutputData": true,
+      "position": [
+        860,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// Collapses the branch to ONE item so the next data-table read runs\n// once. Rows stay reachable via $('Load Boards').all().\n// Mode: Run Once for All Items.\n\nreturn [{ json: { loaded: $input.all().length } }];\n"
+      }
+    },
+    {
+      "id": "dt-items",
+      "name": "Load Items",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1080,
+        -140
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "JaT1fvUeN6R77Pg2"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "gt-items",
+      "name": "Items Loaded",
+      "notes": "Single-item gate - keeps the next table read from running N times.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "alwaysOutputData": true,
+      "position": [
+        1300,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// Collapses the branch to ONE item so the next data-table read runs\n// once. Rows stay reachable via $('Load Items').all().\n// Mode: Run Once for All Items.\n\nreturn [{ json: { loaded: $input.all().length } }];\n"
+      }
+    },
+    {
+      "id": "dt-queue",
+      "name": "Load Queue",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1520,
+        -140
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {},
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cd-select",
+      "name": "Select To Publish",
+      "notes": "All the selection rules. Unit-tested in src/publisher.test.js (24 cases).",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "/**\n * Publish selection. Pure functions, no n8n, no clock of its own.\n *\n * Two publishing shapes, chosen per row rather than globally:\n *\n *   scheduled - hand the post to Facebook with published=false and a\n *               scheduled_publish_time, and let Facebook publish it. Fewer\n *               moving parts: n8n does not have to be alive at 10:00.\n *   immediate - publish now. Used when a row's slot has already arrived (or\n *               passed), because Facebook refuses a scheduled time that is\n *               not at least 10 minutes out.\n *\n * Source-agnostic: works from schedule rows and items keyed on\n * etsy_listing_id.\n */\n\nconst MIN_LEAD_MS = 10 * 60_000;            // Facebook's own minimum\nconst MAX_AHEAD_MS = 180 * 86_400_000;      // Facebook's own maximum (~6 months)\n\n/** Statuses this workflow is allowed to act on. */\nconst ACTIONABLE = new Set(['queued', 'failed']);\n\nfunction parseList(v) {\n  if (Array.isArray(v)) return v.map(String);\n  if (typeof v === 'string' && v.trim()) {\n    try {\n      const p = JSON.parse(v);\n      if (Array.isArray(p)) return p.map(String);\n      if (typeof p === 'string') return [p];\n    } catch { return [v]; }\n  }\n  return [];\n}\n\n/**\n * Decide what to publish this run.\n *\n * @returns {{toPublish:Array, toSkip:Array, notYet:Array, report:Object}}\n */\nfunction selectForPublish({\n  rows = [],\n  items = [],\n  enabledBoards = [],\n  nowMs = Date.now(),\n  retryDelayMinutes = 30,\n  maxAttempts = 2,\n  maxPerRun = 20,\n  minLeadMs = MIN_LEAD_MS,\n  maxAheadMs = MAX_AHEAD_MS,\n} = {}) {\n  const enabled = new Set(enabledBoards.map(String));\n  const itemById = new Map();\n  for (const it of items) {\n    if (it && it.etsy_listing_id) itemById.set(String(it.etsy_listing_id), it);\n  }\n\n  const toPublish = [];\n  const toSkip = [];\n  const notYet = [];\n\n  // Earliest slots first: a backlog drains in schedule order.\n  const ordered = rows\n    .filter((r) => r && ACTIONABLE.has(String(r.status || '')))\n    .slice()\n    .sort((a, b) => String(a.scheduled_at || '').localeCompare(String(b.scheduled_at || '')));\n\n  for (const row of ordered) {\n    const id = String(row.etsy_listing_id || '');\n    const status = String(row.status || '');\n    const attempts = Number(row.attempts) || 0;\n\n    // --- retry gating for a row that already failed ------------------------\n    if (status === 'failed') {\n      if (attempts >= maxAttempts) {\n        notYet.push({ row_id: row.id, etsy_listing_id: id,\n          reason: 'retry_limit_reached', attempts, error: row.error || '' });\n        continue;\n      }\n      const last = Date.parse(row.last_attempt_at || row.updatedAt || '');\n      const waited = Number.isFinite(last) ? nowMs - last : Infinity;\n      if (waited < retryDelayMinutes * 60_000) {\n        notYet.push({ row_id: row.id, etsy_listing_id: id,\n          reason: 'retry_delay_not_elapsed', attempts,\n          minutes_remaining: Math.ceil((retryDelayMinutes * 60_000 - waited) / 60_000) });\n        continue;\n      }\n    }\n\n    // --- the item must still exist ----------------------------------------\n    const item = itemById.get(id);\n    if (!item) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'item_row_missing',\n        error: `No items row for listing ${id}. It was removed, or the sync `\n          + 'never produced it.' });\n      continue;\n    }\n\n    // --- boards must still be enabled -------------------------------------\n    const boards = parseList(item.board_slugs);\n    if (!boards.some((b) => enabled.has(b))) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'skipped',\n        reason: 'all_boards_disabled',\n        error: `Every board for this listing is disabled (${boards.join(', ') || 'none'}).` });\n      continue;\n    }\n\n    // --- there must be something to post ----------------------------------\n    const image_url = String(item.image_url || '');\n    if (!image_url) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'no_image', error: 'The items row has no image_url.' });\n      continue;\n    }\n    const post_text = String(row.post_text || '');\n    if (!post_text.trim()) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'no_post_text', error: 'The schedule row has an empty post_text.' });\n      continue;\n    }\n\n    // --- immediate or scheduled? ------------------------------------------\n    const slot = Date.parse(row.scheduled_at || '');\n    if (!Number.isFinite(slot)) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'bad_scheduled_at',\n        error: `scheduled_at is not a date: ${row.scheduled_at}` });\n      continue;\n    }\n\n    const lead = slot - nowMs;\n    if (lead > maxAheadMs) {\n      // Beyond what Facebook will accept; a later run will pick it up.\n      notYet.push({ row_id: row.id, etsy_listing_id: id,\n        reason: 'beyond_facebook_scheduling_window',\n        scheduled_at: row.scheduled_at,\n        days_ahead: Math.round(lead / 86_400_000) });\n      continue;\n    }\n\n    const mode = lead >= minLeadMs ? 'scheduled' : 'immediate';\n\n    if (toPublish.length >= maxPerRun) {\n      notYet.push({ row_id: row.id, etsy_listing_id: id,\n        reason: 'max_publish_per_run', scheduled_at: row.scheduled_at });\n      continue;\n    }\n\n    toPublish.push({\n      row_id: row.id,\n      etsy_listing_id: id,\n      board_slug: row.board_slug || '',\n      post_text,\n      image_url,\n      etsy_url: item.etsy_url || `https://www.etsy.com/listing/${id}`,\n      scheduled_at: row.scheduled_at,\n      mode,\n      // Facebook wants whole seconds since the epoch, and only for a\n      // scheduled post.\n      scheduled_publish_time: mode === 'scheduled' ? Math.floor(slot / 1000) : null,\n      attempts: attempts + 1,\n      was_retry: status === 'failed',\n    });\n  }\n\n  return {\n    toPublish,\n    toSkip,\n    notYet,\n    report: {\n      actionable_rows: ordered.length,\n      publishing: toPublish.length,\n      scheduled: toPublish.filter((p) => p.mode === 'scheduled').length,\n      immediate: toPublish.filter((p) => p.mode === 'immediate').length,\n      retries: toPublish.filter((p) => p.was_retry).length,\n      skipping: toSkip.length,\n      deferred: notYet.length,\n      skip_reasons: toSkip.reduce((a, s) => {\n        a[s.reason] = (a[s.reason] || 0) + 1; return a;\n      }, {}),\n      defer_reasons: notYet.reduce((a, s) => {\n        a[s.reason] = (a[s.reason] || 0) + 1; return a;\n      }, {}),\n    },\n  };\n}\n\n/**\n * Turn a selection entry into the two Graph API calls.\n *\n * A scheduled photo post is a two-step operation: upload the photo\n * unpublished to get a media id, then create the feed post with that\n * attachment and the publish time. Posting the photo directly to /photos with\n * a scheduled time is not reliable across API versions.\n */\nfunction buildGraphCalls(entry, { pageId, apiVersion = 'v21.0' } = {}) {\n  if (!pageId) throw new Error('FB_PAGE_ID is not set in the config table.');\n  const base = `https://graph.facebook.com/${apiVersion}`;\n  return {\n    photo: {\n      url: `${base}/${pageId}/photos`,\n      body: { url: entry.image_url, published: false },\n    },\n    // media_fbid is filled in once the upload returns.\n    feed: {\n      url: `${base}/${pageId}/feed`,\n      body: {\n        message: entry.post_text,\n        published: entry.mode === 'scheduled' ? false : true,\n        ...(entry.mode === 'scheduled'\n          ? { scheduled_publish_time: entry.scheduled_publish_time } : {}),\n      },\n    },\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Workflow C: decide what to publish, and how.\n// Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst boards = $('Load Boards').all().map((i) => i.json || {}).filter((b) => b.board_slug);\nconst items = $('Load Items').all().map((i) => i.json || {}).filter((r) => r.etsy_listing_id);\nconst rows = $('Load Queue').all().map((i) => i.json || {}).filter((r) => r.etsy_listing_id);\n\nconst enabledBoards = boards.filter((b) => b.enabled === true).map((b) => b.board_slug);\nconst nowMs = Date.now();\n\nconst plan = selectForPublish({\n  rows,\n  items,\n  enabledBoards,\n  nowMs,\n  retryDelayMinutes: cfg._retry_delay_minutes,\n  maxAttempts: 2,\n  maxPerRun: cfg._max_publish,\n});\n\n// In live mode the Page id comes from the OAuth login itself, so the config\n// key is optional. Pick Page does not run during a dry run.\nconst oauthPageId = (() => {\n  try {\n    const p = $('Pick Page').first().json;\n    return p && p.ok ? String(p.page_id) : '';\n  } catch {\n    return '';\n  }\n})();\n\nconst realPageId = String(cfg.FB_PAGE_ID || '').trim() || oauthPageId;\nconst apiVersion = String(cfg.FB_API_VERSION || 'v21.0').trim();\nconst out = [];\n\n// A dry run never calls Facebook, so it does not need a real Page id - and\n// being able to validate the whole path BEFORE obtaining a token is the\n// entire point of the dry run. The placeholder is obvious on sight in the\n// logged URLs.\nconst pageId = realPageId || (cfg._dry_run ? 'FB_PAGE_ID_NOT_SET' : '');\n\n// Outside a dry run, a missing Page id means nothing can be published. Say so\n// once, rather than failing every row with an opaque HTTP error.\nif (plan.toPublish.length && !pageId) {\n  out.push({ json: {\n    _kind: 'report',\n    workflow: 'C - Publisher',\n    level: 'error',\n    context: 'publish_blocked',\n    created_at: new Date(nowMs).toISOString(),\n    ...plan.report,\n    publishing: 0,\n    note: 'FB_PAGE_ID is empty in the config table, so nothing was published. '\n        + `${plan.toPublish.length} row(s) are ready and waiting. Either `\n        + 'connect the \"Facebook OAuth (login)\" credential, which supplies '\n        + 'the Page id automatically, or fill FB_PAGE_ID in the config table.',\n  } });\n  // Skip rows still get applied - a disabled board should not wait on a token.\n  for (const s of plan.toSkip) out.push({ json: { _kind: 'skip', ...s } });\n  return out;\n}\n\nfor (const p of plan.toPublish) {\n  const calls = buildGraphCalls(p, { pageId, apiVersion });\n  out.push({ json: {\n    _kind: 'publish',\n    ...p,\n    fb_photo_url: calls.photo.url,\n    fb_feed_url: calls.feed.url,\n    fb_published: calls.feed.body.published,\n    fb_scheduled_publish_time: calls.feed.body.scheduled_publish_time ?? null,\n    dry_run: cfg._dry_run,\n  } });\n}\n\nfor (const s of plan.toSkip) out.push({ json: { _kind: 'skip', ...s } });\n\nout.push({ json: {\n  _kind: 'report',\n  workflow: 'C - Publisher',\n  level: plan.toSkip.length ? 'warn' : 'info',\n  context: 'publish_summary',\n  created_at: new Date(nowMs).toISOString(),\n  dry_run: cfg._dry_run,\n  page_id_set: Boolean(realPageId),\n  ...plan.report,\n  deferred_examples: plan.notYet.slice(0, 5),\n  note: cfg._dry_run\n    ? 'DRY_RUN is on: nothing was sent to Facebook. The exact request bodies '\n      + 'are in errors_log. Set DRY_RUN=false in config once the token is in.'\n      + (realPageId ? '' : ' FB_PAGE_ID is still empty, so the logged URLs '\n        + 'carry a placeholder.')\n    : `Publishing ${plan.report.publishing} post(s): `\n      + `${plan.report.scheduled} handed to Facebook as scheduled, `\n      + `${plan.report.immediate} published immediately.`,\n} });\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "if-pub",
+      "name": "To Publish?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "publish",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "if-skip",
+      "name": "To Skip?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "skip",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-applyskip",
+      "name": "Apply Skip",
+      "notes": "A disabled board or broken data is recorded on the row itself, not just in the log.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        2180,
+        60
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.status }}",
+            "error": "={{ $json.error }}",
+            "last_attempt_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "loop-pub",
+      "name": "Loop Publish",
+      "notes": "One post at a time: each needs its own claim before any HTTP call.",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2180,
+        -240
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-claim",
+      "name": "Claim Row",
+      "notes": "ATOMIC CLAIM. Matches on id AND current status, so a row already taken by another run updates zero rows.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        2400,
+        -140
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.row_id }}"
+            },
+            {
+              "id": "c1",
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "={{ $json.was_retry ? \"failed\" : \"queued\" }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "posting",
+            "attempts": "={{ $json.attempts }}",
+            "last_attempt_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-verify",
+      "name": "Verify Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "// Confirms the atomic claim actually took.\n//\n// \"Claim Row\" updates the row only when its status is still the one we read,\n// so if another run (or a second trigger firing) got there first, zero rows\n// change. That is the double-post guard: without a confirmed claim we do not\n// call Facebook at all.\n// Mode: Run Once for All Items.\n\nconst entry = $('Loop Publish').first().json;\nconst updated = $input.all().map((i) => i.json || {}).filter((r) => r && r.id);\n\nconst claimed = updated.length > 0;\n\nreturn [{ json: {\n  ...entry,\n  claimed,\n  claim_note: claimed\n    ? `Row ${entry.row_id} claimed (status -> posting).`\n    : `Row ${entry.row_id} was NOT claimed - its status changed since it was `\n      + 'read, so another run owns it. Skipping to avoid a double post.',\n} }];\n"
+      }
+    },
+    {
+      "id": "if-claimed",
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2840,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json.claimed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-lostrace",
+      "name": "Log Lost Race",
+      "notes": "Another run owned the row. Not an error - this is the guard working.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        3060,
+        40
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "C - Publisher",
+            "level": "warn",
+            "context": "=claim_lost",
+            "message": "={{ JSON.stringify($json) }}",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    },
+    {
+      "id": "if-dry",
+      "name": "Dry Run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3060,
+        -240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json.dry_run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dt-dryrun",
+      "name": "Log Dry Run",
+      "notes": "What WOULD have been sent to Facebook, including the exact URLs and the scheduled publish time.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        3280,
+        -380
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "C - Publisher",
+            "level": "info",
+            "context": "=dry_run",
+            "message": "={{ JSON.stringify($json) }}",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    },
+    {
+      "id": "dt-release",
+      "name": "Release Row",
+      "notes": "Puts the row back exactly as it was - a dry run costs no attempt.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        3500,
+        -380
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Verify Claim').first().json.row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "queued",
+            "attempts": "={{ $('Verify Claim').first().json.attempts - 1 }}",
+            "last_attempt_at": "={{ null }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-photo-url",
+      "name": "FB Upload Photo By URL",
+      "notes": "Step 1 of 2. Facebook fetches the image itself.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        3280,
+        -140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.fb_photo_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.image_url }}"
+            },
+            {
+              "name": "published",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "if-photook",
+      "name": "Photo Uploaded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3500,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "version": 2,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c0",
+              "leftValue": "={{ $json.body && $json.body.id ? $json.body.id : \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-download",
+      "name": "Download Image",
+      "notes": "Fallback: Facebook could not fetch the URL, so we fetch the bytes.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        3500,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Verify Claim').first().json.image_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "image/avif,image/webp,image/*,*/*;q=0.8"
+            },
+            {
+              "name": "Referer",
+              "value": "https://www.pinterest.com/"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 45000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "http-photo-bin",
+      "name": "FB Upload Photo Binary",
+      "notes": "Uploads the downloaded bytes as a file instead of a URL.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        3720,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Verify Claim').first().json.fb_photo_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "source",
+              "inputDataFieldName": "data"
+            },
+            {
+              "parameterType": "formData",
+              "name": "published",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cd-media",
+      "name": "Media Id",
+      "notes": "Reads the photo id from whichever upload path ran.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3940,
+        20
+      ],
+      "parameters": {
+        "jsCode": "// Reads the photo id from whichever upload path ran.\n//\n// The URL upload is tried first. If Facebook cannot fetch the image itself\n// (Pinterest hotlink protection, for example) the binary path downloads the\n// bytes in n8n and uploads them as a file instead.\n// Mode: Run Once for All Items.\n\nconst entry = $('Verify Claim').first().json;\n\nconst idFrom = (nodeName) => {\n  try {\n    const j = $(nodeName).first().json || {};\n    // Graph returns { id } for an unpublished photo. With fullResponse the\n    // payload sits under .body.\n    const body = j.body && typeof j.body === 'object' ? j.body : j;\n    return body && body.id ? String(body.id) : '';\n  } catch {\n    return ''; // node did not run\n  }\n};\n\nconst viaUrl = idFrom('FB Upload Photo By URL');\nconst viaBinary = idFrom('FB Upload Photo Binary');\nconst media_fbid = viaUrl || viaBinary;\n\nif (!media_fbid) {\n  return [{ json: { ...entry, media_fbid: '', upload_path: 'none',\n    upload_error: 'Neither the URL upload nor the binary upload returned a '\n      + 'photo id. See the two FB Upload nodes in this execution.' } }];\n}\n\nreturn [{ json: {\n  ...entry,\n  media_fbid,\n  upload_path: viaUrl ? 'url' : 'binary',\n  upload_error: '',\n} }];\n"
+      }
+    },
+    {
+      "id": "http-post",
+      "name": "FB Create Post",
+      "notes": "Step 2 of 2. published=false + scheduled_publish_time makes Facebook publish it at the slot.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4160,
+        20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.fb_feed_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $json.post_text }}"
+            },
+            {
+              "name": "attached_media[0]",
+              "value": "={{ JSON.stringify({ media_fbid: $json.media_fbid }) }}"
+            },
+            {
+              "name": "published",
+              "value": "={{ $json.fb_published ? \"true\" : \"false\" }}"
+            },
+            {
+              "name": "scheduled_publish_time",
+              "value": "={{ $json.fb_scheduled_publish_time || \"\" }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cd-result",
+      "name": "Handle Result",
+      "notes": "Maps the Graph response (or its error) onto the row update.",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4380,
+        20
+      ],
+      "parameters": {
+        "jsCode": "// Maps the Graph API response onto the schedule row update.\n// Mode: Run Once for All Items.\n\nconst entry = $('Media Id').first().json;\nconst nowIso = new Date().toISOString();\n\nconst res = $input.first().json || {};\nconst body = res.body && typeof res.body === 'object' ? res.body : res;\nconst httpStatus = res.statusCode ?? null;\n\n// Graph returns { id: \"<page>_<post>\" } on success, or { error: {...} }.\nconst postId = body && body.id ? String(body.id) : '';\nconst gErr = body && body.error ? body.error : null;\n\nif (postId && !gErr) {\n  const scheduled = entry.mode === 'scheduled';\n  return [{ json: {\n    row_id: entry.row_id,\n    etsy_listing_id: entry.etsy_listing_id,\n    // `scheduled` means Facebook accepted it and will publish at\n    // scheduled_at. It is deliberately distinct from `posted` so the\n    // scheduler still treats the listing as taken, and so a later\n    // verification pass can tell the two apart.\n    status: scheduled ? 'scheduled' : 'posted',\n    fb_post_id: postId,\n    fb_media_id: entry.media_fbid || '',\n    error: '',\n    attempts: entry.attempts,\n    last_attempt_at: nowIso,\n    posted_at: scheduled ? entry.scheduled_at : nowIso,\n    _ok: true,\n    _note: scheduled\n      ? `Accepted by Facebook, will publish at ${entry.scheduled_at}.`\n      : 'Published immediately.',\n  } }];\n}\n\nconst message = gErr\n  ? `${gErr.type || 'GraphError'} ${gErr.code ?? ''}: ${gErr.message || ''}`\n    + (gErr.error_user_msg ? ` (${gErr.error_user_msg})` : '')\n  : entry.upload_error\n    || `Facebook returned no post id (http ${httpStatus ?? 'n/a'}).`;\n\nreturn [{ json: {\n  row_id: entry.row_id,\n  etsy_listing_id: entry.etsy_listing_id,\n  status: 'failed',\n  fb_post_id: '',\n  fb_media_id: entry.media_fbid || '',\n  error: String(message).slice(0, 500),\n  attempts: entry.attempts,\n  last_attempt_at: nowIso,\n  posted_at: null,\n  _ok: false,\n  _note: entry.attempts >= 2\n    ? 'Second failure - the row is parked as failed and will not be retried '\n      + 'automatically. Reschedule it from Workflow D once the cause is fixed.'\n    : `First failure - it will be retried after the configured delay.`,\n} }];\n"
+      }
+    },
+    {
+      "id": "dt-updaterow",
+      "name": "Update Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        4600,
+        20
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "xKKcCos8oPqCFNDW"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "id": "c0",
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.row_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.status }}",
+            "fb_post_id": "={{ $json.fb_post_id }}",
+            "fb_media_id": "={{ $json.fb_media_id }}",
+            "error": "={{ $json.error }}",
+            "attempts": "={{ $json.attempts }}",
+            "last_attempt_at": "={{ $json.last_attempt_at }}",
+            "posted_at": "={{ $json.posted_at }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd-summary",
+      "name": "Publish Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        -420
+      ],
+      "parameters": {
+        "jsCode": "// Final report for a publish run. Tolerates branches that did not execute.\n// Mode: Run Once for All Items.\n\nconst safe = (name) => {\n  try { return $(name).all().map((i) => i.json || {}); } catch { return []; }\n};\n\nconst results = safe('Handle Result');\nconst ok = results.filter((r) => r._ok);\nconst failed = results.filter((r) => r._ok === false);\nconst dry = safe('Log Dry Run');\n\nreturn [{ json: {\n  workflow: 'C - Publisher',\n  level: failed.length ? 'error' : 'info',\n  context: 'publish_run',\n  created_at: new Date().toISOString(),\n  published_ok: ok.length,\n  scheduled_on_facebook: ok.filter((r) => r.status === 'scheduled').length,\n  published_immediately: ok.filter((r) => r.status === 'posted').length,\n  failed: failed.length,\n  dry_run_entries: dry.length,\n  failures: failed.map((f) => ({\n    etsy_listing_id: f.etsy_listing_id, attempts: f.attempts, error: f.error,\n  })),\n  successes: ok.map((r) => ({\n    etsy_listing_id: r.etsy_listing_id, status: r.status,\n    fb_post_id: r.fb_post_id, posted_at: r.posted_at,\n  })),\n} }];\n"
+      }
+    },
+    {
+      "id": "dt-publog",
+      "name": "Write Publish Log",
+      "notes": "The run report, including every failure with its Graph API error message.",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        2840,
+        -420
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "VahesI6mpjXmcBX5"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "C - Publisher",
+            "level": "={{ $json.level }}",
+            "context": "={{ $json.context }}",
+            "message": "={{ JSON.stringify($json) }}",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Publish": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Live Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Live Mode?": {
+      "main": [
+        [
+          {
+            "node": "OAuth Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Boards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OAuth Mode?": {
+      "main": [
+        [
+          {
+            "node": "FB List Pages (OAuth)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FB List Pages (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB List Pages (OAuth)": {
+      "main": [
+        [
+          {
+            "node": "Pick Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB List Pages (Token)": {
+      "main": [
+        [
+          {
+            "node": "Pick Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Page": {
+      "main": [
+        [
+          {
+            "node": "Page Resolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page Resolved?": {
+      "main": [
+        [
+          {
+            "node": "Load Boards",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Auth Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Boards": {
+      "main": [
+        [
+          {
+            "node": "Boards Loaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Boards Loaded": {
+      "main": [
+        [
+          {
+            "node": "Load Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Items": {
+      "main": [
+        [
+          {
+            "node": "Items Loaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Items Loaded": {
+      "main": [
+        [
+          {
+            "node": "Load Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Queue": {
+      "main": [
+        [
+          {
+            "node": "Select To Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select To Publish": {
+      "main": [
+        [
+          {
+            "node": "To Publish?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To Publish?": {
+      "main": [
+        [
+          {
+            "node": "Loop Publish",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "To Skip?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To Skip?": {
+      "main": [
+        [
+          {
+            "node": "Apply Skip",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write Publish Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Publish": {
+      "main": [
+        [
+          {
+            "node": "Publish Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Row": {
+      "main": [
+        [
+          {
+            "node": "Verify Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Claim": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Dry Run?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Lost Race",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Lost Race": {
+      "main": [
+        [
+          {
+            "node": "Loop Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run?": {
+      "main": [
+        [
+          {
+            "node": "Log Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FB Upload Photo By URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Dry Run": {
+      "main": [
+        [
+          {
+            "node": "Release Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Row": {
+      "main": [
+        [
+          {
+            "node": "Loop Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Upload Photo By URL": {
+      "main": [
+        [
+          {
+            "node": "Photo Uploaded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Photo Uploaded?": {
+      "main": [
+        [
+          {
+            "node": "Media Id",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "FB Upload Photo Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Upload Photo Binary": {
+      "main": [
+        [
+          {
+            "node": "Media Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Id": {
+      "main": [
+        [
+          {
+            "node": "FB Create Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Create Post": {
+      "main": [
+        [
+          {
+            "node": "Handle Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Result": {
+      "main": [
+        [
+          {
+            "node": "Update Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Row": {
+      "main": [
+        [
+          {
+            "node": "Loop Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Summary": {
+      "main": [
+        [
+          {
+            "node": "Write Publish Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Europe/Belgrade",
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "PvlehC1HppyNUe9b"
+  },
+  "staticData": {
+    "node:Every 30 Minutes": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "5e40Xz6KQgc6ihqp",
+      "projectId": "ddGoL4iYjV8UejMn",
+      "project": {
+        "id": "ddGoL4iYjV8UejMn",
+        "name": "Raf Arak <rafaraksrb@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-09-30T15:35:08.876Z",
+        "updatedAt": "2026-09-30T15:37:26.910Z"
+      },
+      "createdAt": "2026-09-30T21:55:59.431Z",
+      "updatedAt": "2026-09-30T21:55:59.431Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "6a108c10-02a6-4017-b7e9-ac944a2068ce",
+    "workflowId": "5e40Xz6KQgc6ihqp",
+    "nodes": [
+      {
+        "id": "sn-c",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -660,
+          -420
+        ],
+        "parameters": {
+          "width": 540,
+          "height": 430,
+          "color": 3,
+          "content": "## C - Publisher\n\nRuns every 30 minutes (:13 and :43) or on demand.\n\n**Scheduling is handed to Facebook.** A row more than 10 minutes out is\nsent with `published=false` + `scheduled_publish_time`, and Facebook\npublishes it at the slot, so n8n need not be awake at 10:00. A row\nwhose slot already arrived is published immediately, so nothing is\nlost to downtime.\n\n**Two ways to authenticate**, set by `AUTH_MODE` in config:\n\n`oauth` - open the *Facebook OAuth (login)* credential, paste App ID and\nSecret, click **Connect my account**; Facebook's own login window\nopens. Needs a redirect URI whitelisted in the Meta app.\n\n`token` - paste a long-lived **user** token into *Facebook User Token*.\nNo redirect URI needed; the Graph API Explorer issues one directly.\n\nEither way the run derives the **Page** token itself via\n`/me/accounts`, so nothing is copied twice and `FB_PAGE_ID` is\noptional when the account manages one Page.\n\n**DRY_RUN is ON by default.** Everything runs except the Facebook calls,\nand the exact request bodies land in `errors_log`. Set `DRY_RUN=false`\nin config when you are ready to post.\n\nStatus flow: `queued` -> `posting` (claimed) -> `scheduled` (accepted by\nFacebook) or `posted` (published now) / `failed` / `skipped`."
+        }
+      },
+      {
+        "id": "sn-c2",
+        "name": "Sticky Note1",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -660,
+          60
+        ],
+        "parameters": {
+          "width": 540,
+          "height": 310,
+          "color": 4,
+          "content": "### Double-post protection\n\n`Claim Row` updates the row **only if its status is still what we read**\n(both `id` and `status` must match). If another run got there first,\nzero rows change, `Verify Claim` sees no updated row, and this run\nstops without calling Facebook.\n\nThat is why the claim happens first, and why every HTTP node sits\nbehind it.\n\n### Image fallback\n\nThe photo is uploaded by URL first. If Facebook cannot fetch it\n(Pinterest hotlink protection), the bytes are downloaded in n8n and\nuploaded as a file instead."
+        }
+      },
+      {
+        "id": "trg-cron",
+        "name": "Every 30 Minutes",
+        "notes": "Off :00/:30 deliberately - those are the busiest scheduler minutes.",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -40,
+          -220
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "13,43 * * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "trg-manual",
+        "name": "Manual Publish",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -40,
+          -60
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "dt-config",
+        "name": "Load Config",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          200,
+          -140
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "Fzx5awBGnmaDaffF"
+          },
+          "matchType": "allConditions",
+          "filters": {},
+          "returnAll": true
+        }
+      },
+      {
+        "id": "cd-config",
+        "name": "Config",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          420,
+          -140
+        ],
+        "parameters": {
+          "jsCode": "// Flattens the config table into one object so later nodes can read settings\n// as $('Config').first().json.SLOTS instead of searching rows.\n// Defaults are applied for any key missing from the table, so the workflow\n// still runs on a fresh install. Mode: Run Once for All Items.\n\nconst DEFAULTS = {\n  TIMEZONE: 'Europe/Belgrade',\n  SLOTS: '10:00,15:00,20:00',\n  TEXT_MODE: 'pinterest',\n  REPOST_AFTER_DAYS: '60',\n  SCHEDULE_HORIZON_DAYS: '14',\n  MAX_QUEUE_PER_RUN: '60',\n  RETRY_DELAY_MINUTES: '30',\n  EXTRA_HASHTAGS: '',\n  POST_TEXT_MAX_CHARS: '600',\n  FB_PAGE_ID: '',\n  PIN_RESOLVE_MAX_PER_RUN: '10',\n  RESOLVE_THROTTLE_MS: '2000',\n  RESOLVE_MAX_ATTEMPTS: '3',\n  DRY_RUN: 'true',\n  MAX_PUBLISH_PER_RUN: '20',\n  FB_API_VERSION: 'v21.0',\n  AUTH_MODE: 'oauth',\n};\n\nconst cfg = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  if (r.key) cfg[String(r.key)] = r.value == null ? '' : String(r.value);\n}\n\n// Typed views, so consumers never re-parse strings.\ncfg._slots = String(cfg.SLOTS).split(',').map((s) => s.trim()).filter(Boolean);\ncfg._repost_after_days = Number(cfg.REPOST_AFTER_DAYS) || 0;\ncfg._resolve_max = Math.max(1, Number(cfg.PIN_RESOLVE_MAX_PER_RUN) || 10);\ncfg._throttle_ms = Math.max(0, Number(cfg.RESOLVE_THROTTLE_MS) || 0);\ncfg._resolve_max_attempts = Math.max(1, Number(cfg.RESOLVE_MAX_ATTEMPTS) || 3);\ncfg._horizon_days = Math.max(1, Number(cfg.SCHEDULE_HORIZON_DAYS) || 14);\ncfg._max_queue = Math.max(1, Number(cfg.MAX_QUEUE_PER_RUN) || 60);\ncfg._text_max = Math.max(80, Number(cfg.POST_TEXT_MAX_CHARS) || 600);\ncfg._retry_delay_minutes = Math.max(1, Number(cfg.RETRY_DELAY_MINUTES) || 30);\ncfg._max_publish = Math.max(1, Number(cfg.MAX_PUBLISH_PER_RUN) || 20);\n// Anything but an explicit \"false\" keeps the safety on.\ncfg._dry_run = String(cfg.DRY_RUN).trim().toLowerCase() !== 'false';\n// Anything other than an explicit \"token\" means the OAuth login path.\ncfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'\n  ? 'token' : 'oauth';\n\nreturn [{ json: cfg }];\n"
+        }
+      },
+      {
+        "id": "if-live",
+        "name": "Live Mode?",
+        "notes": "TRUE = really posting, so a Page token is needed. A dry run skips the Facebook calls entirely and needs no credential.",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          620,
+          -140
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._dry_run === false }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "if-authmode",
+        "name": "OAuth Mode?",
+        "notes": "AUTH_MODE in config. oauth = the login credential; token = a pasted long-lived user token. Both end at Pick Page.",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          840,
+          -320
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $('Config').first().json._auth_mode }}",
+                "rightValue": "oauth",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "http-pages",
+        "name": "FB List Pages (OAuth)",
+        "notes": "Uses the Facebook login. Needs a redirect URI whitelisted in the Meta app.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          1060,
+          -440
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "oAuth2Api",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "fields",
+                "value": "id,name,access_token"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "oAuth2Api": {
+            "id": "gew3mnOJy0FEybxs",
+            "name": "Facebook OAuth (login)"
+          }
+        }
+      },
+      {
+        "id": "http-pages-tok",
+        "name": "FB List Pages (Token)",
+        "notes": "Uses a pasted long-lived USER token. No redirect URI needed - the Graph API Explorer issues one directly.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          1060,
+          -260
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://graph.facebook.com/' + $('Config').first().json.FB_API_VERSION + '/me/accounts' }}",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "fields",
+                "value": "id,name,access_token"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "k62FLo1U37qyXxOk",
+            "name": "Facebook User Token"
+          }
+        }
+      },
+      {
+        "id": "cd-pickpage",
+        "name": "Pick Page",
+        "notes": "Chooses the Page (by FB_PAGE_ID, or the only one on the account) and keeps its token in memory for this execution only.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          -350
+        ],
+        "parameters": {
+          "jsCode": "// Resolves the Page and its access token at run time.\n//\n// The OAuth credential holds a USER token (that is what the login dialog\n// grants). Posting to a Page needs a PAGE token, which /me/accounts derives\n// from it. Doing that on every run means:\n//   - no token is ever copied by hand or stored in the config table\n//   - a Page token derived from a long-lived user token does not expire\n//   - FB_PAGE_ID becomes optional when the account manages one Page\n// Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst mode = cfg._auth_mode; // 'oauth' | 'token'\n\n// The remedy differs per mode, so hints name the thing the user actually has.\nconst reconnect = mode === 'oauth'\n  ? 'Open Credentials -> \"Facebook OAuth (login)\", fill in App ID and App '\n    + 'Secret, then click \"Connect my account\" and approve the Facebook window.'\n  : 'Open Credentials -> \"Facebook User Token\" and paste a valid long-lived '\n    + 'USER token (Graph API Explorer gives you one; see '\n    + 'docs/facebook-page-token.md).';\nconst res = $input.first().json || {};\nconst body = res.body && typeof res.body === 'object' ? res.body : res;\nconst httpStatus = res.statusCode ?? null;\n\n// Two different failures arrive here and must not be conflated:\n//\n//  1. n8n could not even send the request - almost always because the OAuth\n//     credential has never been connected. The node then emits { error: ... }\n//     with no statusCode, and the error object often serializes to {}.\n//  2. Facebook answered with a Graph error, which has type/code/message.\nconst hasGraphError = body && body.error\n  && (body.error.message || body.error.type || body.error.code !== undefined);\n\nif (httpStatus == null && !hasGraphError) {\n  const raw = res.error ?? body?.error;\n  const detail = raw && (raw.message || raw.description || raw.reason);\n  return [{ json: {\n    ok: false,\n    stage: 'request_not_sent',\n    error: 'The call to /me/accounts never reached Facebook'\n      + (detail ? `: ${detail}` : '.'),\n    hint: `AUTH_MODE is \"${mode}\", and its credential is not usable yet. `\n        + reconnect + ' Re-run afterwards.',\n    http_status: null,\n  } }];\n}\n\nif (hasGraphError) {\n  const e = body.error;\n  const parts = [e.type || 'GraphError', e.code !== undefined ? `(${e.code})` : '']\n    .filter(Boolean).join(' ');\n  return [{ json: {\n    ok: false,\n    stage: 'me_accounts_failed',\n    error: `${parts}: ${e.message || 'no message returned'}`\n      + (e.error_user_msg ? ` - ${e.error_user_msg}` : ''),\n    hint: e.code === 190\n      ? 'The token has expired or been revoked. ' + reconnect\n      : 'Check that pages_show_list, pages_manage_posts and '\n        + 'pages_read_engagement were all granted. '\n        + (mode === 'token'\n          ? 'Note: this must be a USER token, not a Page token - /me/accounts '\n            + 'is what turns one into the other.'\n          : ''),\n    http_status: httpStatus,\n  } }];\n}\n\nconst pages = Array.isArray(body && body.data) ? body.data : [];\n\nif (!pages.length) {\n  return [{ json: {\n    ok: false,\n    stage: 'no_pages',\n    error: 'The logged-in account manages no Pages that this app can see.',\n    hint: 'You must be an admin of the Page, and the login must have granted '\n        + 'pages_show_list.',\n    http_status: httpStatus,\n  } }];\n}\n\nconst wanted = String(cfg.FB_PAGE_ID || '').trim();\nlet page = null;\n\nif (wanted) {\n  page = pages.find((p) => String(p.id) === wanted) || null;\n  if (!page) {\n    return [{ json: {\n      ok: false,\n      stage: 'page_id_not_found',\n      error: `FB_PAGE_ID is ${wanted}, but the logged-in account does not `\n        + 'manage a Page with that id.',\n      pages_available: pages.map((p) => ({ id: p.id, name: p.name })),\n      hint: 'Fix FB_PAGE_ID in the config table, or clear it if the account '\n          + 'manages exactly one Page.',\n      http_status: httpStatus,\n    } }];\n  }\n} else if (pages.length === 1) {\n  page = pages[0];\n} else {\n  return [{ json: {\n    ok: false,\n    stage: 'page_id_required',\n    error: `The account manages ${pages.length} Pages, so FB_PAGE_ID must say `\n      + 'which one to post to.',\n    pages_available: pages.map((p) => ({ id: p.id, name: p.name })),\n    http_status: httpStatus,\n  } }];\n}\n\nif (!page.access_token) {\n  return [{ json: {\n    ok: false,\n    stage: 'no_page_token',\n    error: `Page ${page.id} came back without an access_token.`,\n    hint: 'The login did not grant pages_manage_posts for this Page.',\n  } }];\n}\n\nreturn [{ json: {\n  ok: true,\n  page_id: String(page.id),\n  page_name: String(page.name || ''),\n  // Used as a request header by the publish nodes. Never written to a table.\n  page_token: String(page.access_token),\n  page_id_source: wanted ? 'config' : 'only_page_on_account',\n  auth_mode: mode,\n  pages_available: pages.length,\n} }];\n"
+        }
+      },
+      {
+        "id": "if-pageok",
+        "name": "Page Resolved?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1520,
+          -350
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json.ok }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-authlog",
+        "name": "Log Auth Problem",
+        "notes": "Login or Page resolution failed. The message says which, and what to do.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          1740,
+          -500
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "C - Publisher",
+              "level": "error",
+              "context": "=auth_problem",
+              "message": "={{ JSON.stringify($json) }}",
+              "created_at": "={{ $now.toISO() }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      },
+      {
+        "id": "dt-boards",
+        "name": "Load Boards",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          640,
+          -140
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "eHP9QfDm4Ay8F0HE"
+          },
+          "matchType": "allConditions",
+          "filters": {},
+          "returnAll": true
+        }
+      },
+      {
+        "id": "gt-boards",
+        "name": "Boards Loaded",
+        "notes": "Single-item gate - keeps the next table read from running N times.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "alwaysOutputData": true,
+        "position": [
+          860,
+          -140
+        ],
+        "parameters": {
+          "jsCode": "// Collapses the branch to ONE item so the next data-table read runs\n// once. Rows stay reachable via $('Load Boards').all().\n// Mode: Run Once for All Items.\n\nreturn [{ json: { loaded: $input.all().length } }];\n"
+        }
+      },
+      {
+        "id": "dt-items",
+        "name": "Load Items",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          1080,
+          -140
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "JaT1fvUeN6R77Pg2"
+          },
+          "matchType": "allConditions",
+          "filters": {},
+          "returnAll": true
+        }
+      },
+      {
+        "id": "gt-items",
+        "name": "Items Loaded",
+        "notes": "Single-item gate - keeps the next table read from running N times.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "alwaysOutputData": true,
+        "position": [
+          1300,
+          -140
+        ],
+        "parameters": {
+          "jsCode": "// Collapses the branch to ONE item so the next data-table read runs\n// once. Rows stay reachable via $('Load Items').all().\n// Mode: Run Once for All Items.\n\nreturn [{ json: { loaded: $input.all().length } }];\n"
+        }
+      },
+      {
+        "id": "dt-queue",
+        "name": "Load Queue",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          1520,
+          -140
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "xKKcCos8oPqCFNDW"
+          },
+          "matchType": "allConditions",
+          "filters": {},
+          "returnAll": true
+        }
+      },
+      {
+        "id": "cd-select",
+        "name": "Select To Publish",
+        "notes": "All the selection rules. Unit-tested in src/publisher.test.js (24 cases).",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1740,
+          -140
+        ],
+        "parameters": {
+          "jsCode": "/**\n * Publish selection. Pure functions, no n8n, no clock of its own.\n *\n * Two publishing shapes, chosen per row rather than globally:\n *\n *   scheduled - hand the post to Facebook with published=false and a\n *               scheduled_publish_time, and let Facebook publish it. Fewer\n *               moving parts: n8n does not have to be alive at 10:00.\n *   immediate - publish now. Used when a row's slot has already arrived (or\n *               passed), because Facebook refuses a scheduled time that is\n *               not at least 10 minutes out.\n *\n * Source-agnostic: works from schedule rows and items keyed on\n * etsy_listing_id.\n */\n\nconst MIN_LEAD_MS = 10 * 60_000;            // Facebook's own minimum\nconst MAX_AHEAD_MS = 180 * 86_400_000;      // Facebook's own maximum (~6 months)\n\n/** Statuses this workflow is allowed to act on. */\nconst ACTIONABLE = new Set(['queued', 'failed']);\n\nfunction parseList(v) {\n  if (Array.isArray(v)) return v.map(String);\n  if (typeof v === 'string' && v.trim()) {\n    try {\n      const p = JSON.parse(v);\n      if (Array.isArray(p)) return p.map(String);\n      if (typeof p === 'string') return [p];\n    } catch { return [v]; }\n  }\n  return [];\n}\n\n/**\n * Decide what to publish this run.\n *\n * @returns {{toPublish:Array, toSkip:Array, notYet:Array, report:Object}}\n */\nfunction selectForPublish({\n  rows = [],\n  items = [],\n  enabledBoards = [],\n  nowMs = Date.now(),\n  retryDelayMinutes = 30,\n  maxAttempts = 2,\n  maxPerRun = 20,\n  minLeadMs = MIN_LEAD_MS,\n  maxAheadMs = MAX_AHEAD_MS,\n} = {}) {\n  const enabled = new Set(enabledBoards.map(String));\n  const itemById = new Map();\n  for (const it of items) {\n    if (it && it.etsy_listing_id) itemById.set(String(it.etsy_listing_id), it);\n  }\n\n  const toPublish = [];\n  const toSkip = [];\n  const notYet = [];\n\n  // Earliest slots first: a backlog drains in schedule order.\n  const ordered = rows\n    .filter((r) => r && ACTIONABLE.has(String(r.status || '')))\n    .slice()\n    .sort((a, b) => String(a.scheduled_at || '').localeCompare(String(b.scheduled_at || '')));\n\n  for (const row of ordered) {\n    const id = String(row.etsy_listing_id || '');\n    const status = String(row.status || '');\n    const attempts = Number(row.attempts) || 0;\n\n    // --- retry gating for a row that already failed ------------------------\n    if (status === 'failed') {\n      if (attempts >= maxAttempts) {\n        notYet.push({ row_id: row.id, etsy_listing_id: id,\n          reason: 'retry_limit_reached', attempts, error: row.error || '' });\n        continue;\n      }\n      const last = Date.parse(row.last_attempt_at || row.updatedAt || '');\n      const waited = Number.isFinite(last) ? nowMs - last : Infinity;\n      if (waited < retryDelayMinutes * 60_000) {\n        notYet.push({ row_id: row.id, etsy_listing_id: id,\n          reason: 'retry_delay_not_elapsed', attempts,\n          minutes_remaining: Math.ceil((retryDelayMinutes * 60_000 - waited) / 60_000) });\n        continue;\n      }\n    }\n\n    // --- the item must still exist ----------------------------------------\n    const item = itemById.get(id);\n    if (!item) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'item_row_missing',\n        error: `No items row for listing ${id}. It was removed, or the sync `\n          + 'never produced it.' });\n      continue;\n    }\n\n    // --- boards must still be enabled -------------------------------------\n    const boards = parseList(item.board_slugs);\n    if (!boards.some((b) => enabled.has(b))) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'skipped',\n        reason: 'all_boards_disabled',\n        error: `Every board for this listing is disabled (${boards.join(', ') || 'none'}).` });\n      continue;\n    }\n\n    // --- there must be something to post ----------------------------------\n    const image_url = String(item.image_url || '');\n    if (!image_url) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'no_image', error: 'The items row has no image_url.' });\n      continue;\n    }\n    const post_text = String(row.post_text || '');\n    if (!post_text.trim()) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'no_post_text', error: 'The schedule row has an empty post_text.' });\n      continue;\n    }\n\n    // --- immediate or scheduled? ------------------------------------------\n    const slot = Date.parse(row.scheduled_at || '');\n    if (!Number.isFinite(slot)) {\n      toSkip.push({ row_id: row.id, etsy_listing_id: id, status: 'failed',\n        reason: 'bad_scheduled_at',\n        error: `scheduled_at is not a date: ${row.scheduled_at}` });\n      continue;\n    }\n\n    const lead = slot - nowMs;\n    if (lead > maxAheadMs) {\n      // Beyond what Facebook will accept; a later run will pick it up.\n      notYet.push({ row_id: row.id, etsy_listing_id: id,\n        reason: 'beyond_facebook_scheduling_window',\n        scheduled_at: row.scheduled_at,\n        days_ahead: Math.round(lead / 86_400_000) });\n      continue;\n    }\n\n    const mode = lead >= minLeadMs ? 'scheduled' : 'immediate';\n\n    if (toPublish.length >= maxPerRun) {\n      notYet.push({ row_id: row.id, etsy_listing_id: id,\n        reason: 'max_publish_per_run', scheduled_at: row.scheduled_at });\n      continue;\n    }\n\n    toPublish.push({\n      row_id: row.id,\n      etsy_listing_id: id,\n      board_slug: row.board_slug || '',\n      post_text,\n      image_url,\n      etsy_url: item.etsy_url || `https://www.etsy.com/listing/${id}`,\n      scheduled_at: row.scheduled_at,\n      mode,\n      // Facebook wants whole seconds since the epoch, and only for a\n      // scheduled post.\n      scheduled_publish_time: mode === 'scheduled' ? Math.floor(slot / 1000) : null,\n      attempts: attempts + 1,\n      was_retry: status === 'failed',\n    });\n  }\n\n  return {\n    toPublish,\n    toSkip,\n    notYet,\n    report: {\n      actionable_rows: ordered.length,\n      publishing: toPublish.length,\n      scheduled: toPublish.filter((p) => p.mode === 'scheduled').length,\n      immediate: toPublish.filter((p) => p.mode === 'immediate').length,\n      retries: toPublish.filter((p) => p.was_retry).length,\n      skipping: toSkip.length,\n      deferred: notYet.length,\n      skip_reasons: toSkip.reduce((a, s) => {\n        a[s.reason] = (a[s.reason] || 0) + 1; return a;\n      }, {}),\n      defer_reasons: notYet.reduce((a, s) => {\n        a[s.reason] = (a[s.reason] || 0) + 1; return a;\n      }, {}),\n    },\n  };\n}\n\n/**\n * Turn a selection entry into the two Graph API calls.\n *\n * A scheduled photo post is a two-step operation: upload the photo\n * unpublished to get a media id, then create the feed post with that\n * attachment and the publish time. Posting the photo directly to /photos with\n * a scheduled time is not reliable across API versions.\n */\nfunction buildGraphCalls(entry, { pageId, apiVersion = 'v21.0' } = {}) {\n  if (!pageId) throw new Error('FB_PAGE_ID is not set in the config table.');\n  const base = `https://graph.facebook.com/${apiVersion}`;\n  return {\n    photo: {\n      url: `${base}/${pageId}/photos`,\n      body: { url: entry.image_url, published: false },\n    },\n    // media_fbid is filled in once the upload returns.\n    feed: {\n      url: `${base}/${pageId}/feed`,\n      body: {\n        message: entry.post_text,\n        published: entry.mode === 'scheduled' ? false : true,\n        ...(entry.mode === 'scheduled'\n          ? { scheduled_publish_time: entry.scheduled_publish_time } : {}),\n      },\n    },\n  };\n}\n\n// ---------------------------------------------------------------- n8n glue\n// Workflow C: decide what to publish, and how.\n// Mode: Run Once for All Items.\n\nconst cfg = $('Config').first().json;\nconst boards = $('Load Boards').all().map((i) => i.json || {}).filter((b) => b.board_slug);\nconst items = $('Load Items').all().map((i) => i.json || {}).filter((r) => r.etsy_listing_id);\nconst rows = $('Load Queue').all().map((i) => i.json || {}).filter((r) => r.etsy_listing_id);\n\nconst enabledBoards = boards.filter((b) => b.enabled === true).map((b) => b.board_slug);\nconst nowMs = Date.now();\n\nconst plan = selectForPublish({\n  rows,\n  items,\n  enabledBoards,\n  nowMs,\n  retryDelayMinutes: cfg._retry_delay_minutes,\n  maxAttempts: 2,\n  maxPerRun: cfg._max_publish,\n});\n\n// In live mode the Page id comes from the OAuth login itself, so the config\n// key is optional. Pick Page does not run during a dry run.\nconst oauthPageId = (() => {\n  try {\n    const p = $('Pick Page').first().json;\n    return p && p.ok ? String(p.page_id) : '';\n  } catch {\n    return '';\n  }\n})();\n\nconst realPageId = String(cfg.FB_PAGE_ID || '').trim() || oauthPageId;\nconst apiVersion = String(cfg.FB_API_VERSION || 'v21.0').trim();\nconst out = [];\n\n// A dry run never calls Facebook, so it does not need a real Page id - and\n// being able to validate the whole path BEFORE obtaining a token is the\n// entire point of the dry run. The placeholder is obvious on sight in the\n// logged URLs.\nconst pageId = realPageId || (cfg._dry_run ? 'FB_PAGE_ID_NOT_SET' : '');\n\n// Outside a dry run, a missing Page id means nothing can be published. Say so\n// once, rather than failing every row with an opaque HTTP error.\nif (plan.toPublish.length && !pageId) {\n  out.push({ json: {\n    _kind: 'report',\n    workflow: 'C - Publisher',\n    level: 'error',\n    context: 'publish_blocked',\n    created_at: new Date(nowMs).toISOString(),\n    ...plan.report,\n    publishing: 0,\n    note: 'FB_PAGE_ID is empty in the config table, so nothing was published. '\n        + `${plan.toPublish.length} row(s) are ready and waiting. Either `\n        + 'connect the \"Facebook OAuth (login)\" credential, which supplies '\n        + 'the Page id automatically, or fill FB_PAGE_ID in the config table.',\n  } });\n  // Skip rows still get applied - a disabled board should not wait on a token.\n  for (const s of plan.toSkip) out.push({ json: { _kind: 'skip', ...s } });\n  return out;\n}\n\nfor (const p of plan.toPublish) {\n  const calls = buildGraphCalls(p, { pageId, apiVersion });\n  out.push({ json: {\n    _kind: 'publish',\n    ...p,\n    fb_photo_url: calls.photo.url,\n    fb_feed_url: calls.feed.url,\n    fb_published: calls.feed.body.published,\n    fb_scheduled_publish_time: calls.feed.body.scheduled_publish_time ?? null,\n    dry_run: cfg._dry_run,\n  } });\n}\n\nfor (const s of plan.toSkip) out.push({ json: { _kind: 'skip', ...s } });\n\nout.push({ json: {\n  _kind: 'report',\n  workflow: 'C - Publisher',\n  level: plan.toSkip.length ? 'warn' : 'info',\n  context: 'publish_summary',\n  created_at: new Date(nowMs).toISOString(),\n  dry_run: cfg._dry_run,\n  page_id_set: Boolean(realPageId),\n  ...plan.report,\n  deferred_examples: plan.notYet.slice(0, 5),\n  note: cfg._dry_run\n    ? 'DRY_RUN is on: nothing was sent to Facebook. The exact request bodies '\n      + 'are in errors_log. Set DRY_RUN=false in config once the token is in.'\n      + (realPageId ? '' : ' FB_PAGE_ID is still empty, so the logged URLs '\n        + 'carry a placeholder.')\n    : `Publishing ${plan.report.publishing} post(s): `\n      + `${plan.report.scheduled} handed to Facebook as scheduled, `\n      + `${plan.report.immediate} published immediately.`,\n} });\n\nreturn out;\n"
+        }
+      },
+      {
+        "id": "if-pub",
+        "name": "To Publish?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1960,
+          -140
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._kind }}",
+                "rightValue": "publish",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "if-skip",
+        "name": "To Skip?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1960,
+          140
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json._kind }}",
+                "rightValue": "skip",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-applyskip",
+        "name": "Apply Skip",
+        "notes": "A disabled board or broken data is recorded on the row itself, not just in the log.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          2180,
+          60
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "xKKcCos8oPqCFNDW"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $json.row_id }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "status": "={{ $json.status }}",
+              "error": "={{ $json.error }}",
+              "last_attempt_at": "={{ $now.toISO() }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "loop-pub",
+        "name": "Loop Publish",
+        "notes": "One post at a time: each needs its own claim before any HTTP call.",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          2180,
+          -240
+        ],
+        "parameters": {
+          "batchSize": 1,
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-claim",
+        "name": "Claim Row",
+        "notes": "ATOMIC CLAIM. Matches on id AND current status, so a row already taken by another run updates zero rows.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          2400,
+          -140
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "xKKcCos8oPqCFNDW"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $json.row_id }}"
+              },
+              {
+                "id": "c1",
+                "keyName": "status",
+                "condition": "eq",
+                "keyValue": "={{ $json.was_retry ? \"failed\" : \"queued\" }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "status": "posting",
+              "attempts": "={{ $json.attempts }}",
+              "last_attempt_at": "={{ $now.toISO() }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "cd-verify",
+        "name": "Verify Claim",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2620,
+          -140
+        ],
+        "parameters": {
+          "jsCode": "// Confirms the atomic claim actually took.\n//\n// \"Claim Row\" updates the row only when its status is still the one we read,\n// so if another run (or a second trigger firing) got there first, zero rows\n// change. That is the double-post guard: without a confirmed claim we do not\n// call Facebook at all.\n// Mode: Run Once for All Items.\n\nconst entry = $('Loop Publish').first().json;\nconst updated = $input.all().map((i) => i.json || {}).filter((r) => r && r.id);\n\nconst claimed = updated.length > 0;\n\nreturn [{ json: {\n  ...entry,\n  claimed,\n  claim_note: claimed\n    ? `Row ${entry.row_id} claimed (status -> posting).`\n    : `Row ${entry.row_id} was NOT claimed - its status changed since it was `\n      + 'read, so another run owns it. Skipping to avoid a double post.',\n} }];\n"
+        }
+      },
+      {
+        "id": "if-claimed",
+        "name": "Claimed?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2840,
+          -140
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json.claimed }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-lostrace",
+        "name": "Log Lost Race",
+        "notes": "Another run owned the row. Not an error - this is the guard working.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          3060,
+          40
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "C - Publisher",
+              "level": "warn",
+              "context": "=claim_lost",
+              "message": "={{ JSON.stringify($json) }}",
+              "created_at": "={{ $now.toISO() }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      },
+      {
+        "id": "if-dry",
+        "name": "Dry Run?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3060,
+          -240
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json.dry_run }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "dt-dryrun",
+        "name": "Log Dry Run",
+        "notes": "What WOULD have been sent to Facebook, including the exact URLs and the scheduled publish time.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          3280,
+          -380
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "C - Publisher",
+              "level": "info",
+              "context": "=dry_run",
+              "message": "={{ JSON.stringify($json) }}",
+              "created_at": "={{ $now.toISO() }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      },
+      {
+        "id": "dt-release",
+        "name": "Release Row",
+        "notes": "Puts the row back exactly as it was - a dry run costs no attempt.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          3500,
+          -380
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "xKKcCos8oPqCFNDW"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $('Verify Claim').first().json.row_id }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "status": "queued",
+              "attempts": "={{ $('Verify Claim').first().json.attempts - 1 }}",
+              "last_attempt_at": "={{ null }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "http-photo-url",
+        "name": "FB Upload Photo By URL",
+        "notes": "Step 1 of 2. Facebook fetches the image itself.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          3280,
+          -140
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.fb_photo_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "url",
+                "value": "={{ $json.image_url }}"
+              },
+              {
+                "name": "published",
+                "value": "false"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "if-photook",
+        "name": "Photo Uploaded?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3500,
+          -140
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "version": 2,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c0",
+                "leftValue": "={{ $json.body && $json.body.id ? $json.body.id : \"\" }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "http-download",
+        "name": "Download Image",
+        "notes": "Fallback: Facebook could not fetch the URL, so we fetch the bytes.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          3500,
+          200
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ $('Verify Claim').first().json.image_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+              },
+              {
+                "name": "Accept",
+                "value": "image/avif,image/webp,image/*,*/*;q=0.8"
+              },
+              {
+                "name": "Referer",
+                "value": "https://www.pinterest.com/"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 45000,
+            "response": {
+              "response": {
+                "responseFormat": "file",
+                "outputPropertyName": "data"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "http-photo-bin",
+        "name": "FB Upload Photo Binary",
+        "notes": "Uploads the downloaded bytes as a file instead of a URL.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          3720,
+          200
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $('Verify Claim').first().json.fb_photo_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "parameterType": "formBinaryData",
+                "name": "source",
+                "inputDataFieldName": "data"
+              },
+              {
+                "parameterType": "formData",
+                "name": "published",
+                "value": "false"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "cd-media",
+        "name": "Media Id",
+        "notes": "Reads the photo id from whichever upload path ran.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3940,
+          20
+        ],
+        "parameters": {
+          "jsCode": "// Reads the photo id from whichever upload path ran.\n//\n// The URL upload is tried first. If Facebook cannot fetch the image itself\n// (Pinterest hotlink protection, for example) the binary path downloads the\n// bytes in n8n and uploads them as a file instead.\n// Mode: Run Once for All Items.\n\nconst entry = $('Verify Claim').first().json;\n\nconst idFrom = (nodeName) => {\n  try {\n    const j = $(nodeName).first().json || {};\n    // Graph returns { id } for an unpublished photo. With fullResponse the\n    // payload sits under .body.\n    const body = j.body && typeof j.body === 'object' ? j.body : j;\n    return body && body.id ? String(body.id) : '';\n  } catch {\n    return ''; // node did not run\n  }\n};\n\nconst viaUrl = idFrom('FB Upload Photo By URL');\nconst viaBinary = idFrom('FB Upload Photo Binary');\nconst media_fbid = viaUrl || viaBinary;\n\nif (!media_fbid) {\n  return [{ json: { ...entry, media_fbid: '', upload_path: 'none',\n    upload_error: 'Neither the URL upload nor the binary upload returned a '\n      + 'photo id. See the two FB Upload nodes in this execution.' } }];\n}\n\nreturn [{ json: {\n  ...entry,\n  media_fbid,\n  upload_path: viaUrl ? 'url' : 'binary',\n  upload_error: '',\n} }];\n"
+        }
+      },
+      {
+        "id": "http-post",
+        "name": "FB Create Post",
+        "notes": "Step 2 of 2. published=false + scheduled_publish_time makes Facebook publish it at the slot.",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
+        "position": [
+          4160,
+          20
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.fb_feed_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $('Pick Page').first().json.page_token }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "message",
+                "value": "={{ $json.post_text }}"
+              },
+              {
+                "name": "attached_media[0]",
+                "value": "={{ JSON.stringify({ media_fbid: $json.media_fbid }) }}"
+              },
+              {
+                "name": "published",
+                "value": "={{ $json.fb_published ? \"true\" : \"false\" }}"
+              },
+              {
+                "name": "scheduled_publish_time",
+                "value": "={{ $json.fb_scheduled_publish_time || \"\" }}"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "cd-result",
+        "name": "Handle Result",
+        "notes": "Maps the Graph response (or its error) onto the row update.",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4380,
+          20
+        ],
+        "parameters": {
+          "jsCode": "// Maps the Graph API response onto the schedule row update.\n// Mode: Run Once for All Items.\n\nconst entry = $('Media Id').first().json;\nconst nowIso = new Date().toISOString();\n\nconst res = $input.first().json || {};\nconst body = res.body && typeof res.body === 'object' ? res.body : res;\nconst httpStatus = res.statusCode ?? null;\n\n// Graph returns { id: \"<page>_<post>\" } on success, or { error: {...} }.\nconst postId = body && body.id ? String(body.id) : '';\nconst gErr = body && body.error ? body.error : null;\n\nif (postId && !gErr) {\n  const scheduled = entry.mode === 'scheduled';\n  return [{ json: {\n    row_id: entry.row_id,\n    etsy_listing_id: entry.etsy_listing_id,\n    // `scheduled` means Facebook accepted it and will publish at\n    // scheduled_at. It is deliberately distinct from `posted` so the\n    // scheduler still treats the listing as taken, and so a later\n    // verification pass can tell the two apart.\n    status: scheduled ? 'scheduled' : 'posted',\n    fb_post_id: postId,\n    fb_media_id: entry.media_fbid || '',\n    error: '',\n    attempts: entry.attempts,\n    last_attempt_at: nowIso,\n    posted_at: scheduled ? entry.scheduled_at : nowIso,\n    _ok: true,\n    _note: scheduled\n      ? `Accepted by Facebook, will publish at ${entry.scheduled_at}.`\n      : 'Published immediately.',\n  } }];\n}\n\nconst message = gErr\n  ? `${gErr.type || 'GraphError'} ${gErr.code ?? ''}: ${gErr.message || ''}`\n    + (gErr.error_user_msg ? ` (${gErr.error_user_msg})` : '')\n  : entry.upload_error\n    || `Facebook returned no post id (http ${httpStatus ?? 'n/a'}).`;\n\nreturn [{ json: {\n  row_id: entry.row_id,\n  etsy_listing_id: entry.etsy_listing_id,\n  status: 'failed',\n  fb_post_id: '',\n  fb_media_id: entry.media_fbid || '',\n  error: String(message).slice(0, 500),\n  attempts: entry.attempts,\n  last_attempt_at: nowIso,\n  posted_at: null,\n  _ok: false,\n  _note: entry.attempts >= 2\n    ? 'Second failure - the row is parked as failed and will not be retried '\n      + 'automatically. Reschedule it from Workflow D once the cause is fixed.'\n    : `First failure - it will be retried after the configured delay.`,\n} }];\n"
+        }
+      },
+      {
+        "id": "dt-updaterow",
+        "name": "Update Row",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          4600,
+          20
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "update",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "xKKcCos8oPqCFNDW"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "id": "c0",
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $json.row_id }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "status": "={{ $json.status }}",
+              "fb_post_id": "={{ $json.fb_post_id }}",
+              "fb_media_id": "={{ $json.fb_media_id }}",
+              "error": "={{ $json.error }}",
+              "attempts": "={{ $json.attempts }}",
+              "last_attempt_at": "={{ $json.last_attempt_at }}",
+              "posted_at": "={{ $json.posted_at }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "cd-summary",
+        "name": "Publish Summary",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2620,
+          -420
+        ],
+        "parameters": {
+          "jsCode": "// Final report for a publish run. Tolerates branches that did not execute.\n// Mode: Run Once for All Items.\n\nconst safe = (name) => {\n  try { return $(name).all().map((i) => i.json || {}); } catch { return []; }\n};\n\nconst results = safe('Handle Result');\nconst ok = results.filter((r) => r._ok);\nconst failed = results.filter((r) => r._ok === false);\nconst dry = safe('Log Dry Run');\n\nreturn [{ json: {\n  workflow: 'C - Publisher',\n  level: failed.length ? 'error' : 'info',\n  context: 'publish_run',\n  created_at: new Date().toISOString(),\n  published_ok: ok.length,\n  scheduled_on_facebook: ok.filter((r) => r.status === 'scheduled').length,\n  published_immediately: ok.filter((r) => r.status === 'posted').length,\n  failed: failed.length,\n  dry_run_entries: dry.length,\n  failures: failed.map((f) => ({\n    etsy_listing_id: f.etsy_listing_id, attempts: f.attempts, error: f.error,\n  })),\n  successes: ok.map((r) => ({\n    etsy_listing_id: r.etsy_listing_id, status: r.status,\n    fb_post_id: r.fb_post_id, posted_at: r.posted_at,\n  })),\n} }];\n"
+        }
+      },
+      {
+        "id": "dt-publog",
+        "name": "Write Publish Log",
+        "notes": "The run report, including every failure with its Graph API error message.",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "alwaysOutputData": true,
+        "position": [
+          2840,
+          -420
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "insert",
+          "dataTableId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "VahesI6mpjXmcBX5"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "workflow": "C - Publisher",
+              "level": "={{ $json.level }}",
+              "context": "={{ $json.context }}",
+              "message": "={{ JSON.stringify($json) }}",
+              "created_at": "={{ $now.toISO() }}"
+            },
+            "matchingColumns": [],
+            "schema": []
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Every 30 Minutes": {
+        "main": [
+          [
+            {
+              "node": "Load Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual Publish": {
+        "main": [
+          [
+            {
+              "node": "Load Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Config": {
+        "main": [
+          [
+            {
+              "node": "Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Config": {
+        "main": [
+          [
+            {
+              "node": "Live Mode?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Live Mode?": {
+        "main": [
+          [
+            {
+              "node": "OAuth Mode?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Load Boards",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OAuth Mode?": {
+        "main": [
+          [
+            {
+              "node": "FB List Pages (OAuth)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "FB List Pages (Token)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "FB List Pages (OAuth)": {
+        "main": [
+          [
+            {
+              "node": "Pick Page",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "FB List Pages (Token)": {
+        "main": [
+          [
+            {
+              "node": "Pick Page",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pick Page": {
+        "main": [
+          [
+            {
+              "node": "Page Resolved?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Page Resolved?": {
+        "main": [
+          [
+            {
+              "node": "Load Boards",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Auth Problem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Boards": {
+        "main": [
+          [
+            {
+              "node": "Boards Loaded",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Boards Loaded": {
+        "main": [
+          [
+            {
+              "node": "Load Items",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Items": {
+        "main": [
+          [
+            {
+              "node": "Items Loaded",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Items Loaded": {
+        "main": [
+          [
+            {
+              "node": "Load Queue",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Queue": {
+        "main": [
+          [
+            {
+              "node": "Select To Publish",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Select To Publish": {
+        "main": [
+          [
+            {
+              "node": "To Publish?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "To Publish?": {
+        "main": [
+          [
+            {
+              "node": "Loop Publish",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "To Skip?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "To Skip?": {
+        "main": [
+          [
+            {
+              "node": "Apply Skip",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Write Publish Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Publish": {
+        "main": [
+          [
+            {
+              "node": "Publish Summary",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Claim Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claim Row": {
+        "main": [
+          [
+            {
+              "node": "Verify Claim",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Verify Claim": {
+        "main": [
+          [
+            {
+              "node": "Claimed?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claimed?": {
+        "main": [
+          [
+            {
+              "node": "Dry Run?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Lost Race",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Lost Race": {
+        "main": [
+          [
+            {
+              "node": "Loop Publish",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Dry Run?": {
+        "main": [
+          [
+            {
+              "node": "Log Dry Run",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "FB Upload Photo By URL",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log Dry Run": {
+        "main": [
+          [
+            {
+              "node": "Release Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Release Row": {
+        "main": [
+          [
+            {
+              "node": "Loop Publish",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "FB Upload Photo By URL": {
+        "main": [
+          [
+            {
+              "node": "Photo Uploaded?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Photo Uploaded?": {
+        "main": [
+          [
+            {
+              "node": "Media Id",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Download Image",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download Image": {
+        "main": [
+          [
+            {
+              "node": "FB Upload Photo Binary",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "FB Upload Photo Binary": {
+        "main": [
+          [
+            {
+              "node": "Media Id",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Media Id": {
+        "main": [
+          [
+            {
+              "node": "FB Create Post",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "FB Create Post": {
+        "main": [
+          [
+            {
+              "node": "Handle Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Handle Result": {
+        "main": [
+          [
+            {
+              "node": "Update Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Row": {
+        "main": [
+          [
+            {
+              "node": "Loop Publish",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish Summary": {
+        "main": [
+          [
+            {
+              "node": "Write Publish Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Raf Arak",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-10-02T15:25:32.199Z",
+    "updatedAt": "2026-10-02T15:25:32.199Z",
+    "workflowPublishHistory": [
+      {
+        "id": 126,
+        "workflowId": "5e40Xz6KQgc6ihqp",
+        "versionId": "6a108c10-02a6-4017-b7e9-ac944a2068ce",
+        "event": "activated",
+        "userId": "d60507c1-792d-41c0-b845-ef12edf8ce82",
+        "createdAt": "2026-10-02T15:25:32.700Z"
+      }
+    ]
+  }
+}
