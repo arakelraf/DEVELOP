@@ -178,5 +178,47 @@ t('a missing page id is a clear error, not a malformed URL', () => {
   assert.throws(() => P.buildGraphCalls({}, { pageId: '' }), /FB_PAGE_ID/);
 });
 
+console.log('\nbuildDisplayImageUrl');
+t('wraps an http(s) url in a weserv contain transform', () => {
+  const u = P.buildDisplayImageUrl('https://i.pinimg.com/originals/ab/cd.png', {});
+  assert.ok(u.startsWith('https://images.weserv.nl/?'), u);
+  assert.ok(u.includes('fit=contain'), u);
+  assert.ok(u.includes('w=1080'), u);
+  assert.ok(u.includes('h=1350'), u);
+  assert.ok(u.includes('output=jpg'), u);
+});
+t('source is passed schemeless and url-encoded', () => {
+  const u = P.buildDisplayImageUrl('https://i.pinimg.com/originals/ab/cd.png');
+  assert.ok(u.includes('url=i.pinimg.com%2Foriginals%2Fab%2Fcd.png'), u);
+  assert.ok(!u.includes('https%3A'), u); // scheme stripped before encoding
+});
+t('background colour is applied to both canvas and image bg, # stripped', () => {
+  const u = P.buildDisplayImageUrl('https://x/y.png', { bg: '#ffffff' });
+  assert.ok(u.includes('cbg=ffffff'), u);
+  assert.ok(u.includes('bg=ffffff'), u);
+});
+t('custom canvas size is honoured (square)', () => {
+  const u = P.buildDisplayImageUrl('https://x/y.png', { w: 1080, h: 1080 });
+  assert.ok(u.includes('w=1080') && u.includes('h=1080'), u);
+});
+t('disabled returns the url unchanged', () => {
+  const raw = 'https://i.pinimg.com/originals/ab/cd.png';
+  assert.strictEqual(P.buildDisplayImageUrl(raw, { enabled: false }), raw);
+});
+t('a non-http value is returned unchanged', () => {
+  assert.strictEqual(P.buildDisplayImageUrl('', {}), '');
+  assert.strictEqual(P.buildDisplayImageUrl('data:image/png;base64,AA', {}),
+    'data:image/png;base64,AA');
+  assert.strictEqual(P.buildDisplayImageUrl(null, {}), '');
+});
+
+console.log('\ncanvasForRatio');
+t('maps supported ratios, defaults to 4:5', () => {
+  assert.deepStrictEqual(P.canvasForRatio('4:5'), { w: 1080, h: 1350 });
+  assert.deepStrictEqual(P.canvasForRatio('1:1'), { w: 1080, h: 1080 });
+  assert.deepStrictEqual(P.canvasForRatio('weird'), { w: 1080, h: 1350 });
+  assert.deepStrictEqual(P.canvasForRatio(), { w: 1080, h: 1350 });
+});
+
 console.log('\n' + (fail ? 'FAILED' : 'PASSED') + `  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

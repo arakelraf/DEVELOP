@@ -328,7 +328,9 @@ const nodes = [
       ] },
       sendBody: true,
       bodyParameters: { parameters: [
-        { name: 'url', value: '={{ $json.image_url }}' },
+        // Letterboxed 4:5 image (so the feed never crops it); falls back to
+        // the raw pin url if normalisation produced nothing.
+        { name: 'url', value: '={{ $json.fb_image_url || $json.image_url }}' },
         // Unpublished: this only produces a media id to attach to the post.
         { name: 'published', value: 'false' },
       ] },

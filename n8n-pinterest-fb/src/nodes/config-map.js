@@ -23,6 +23,10 @@ const DEFAULTS = {
   AUTH_MODE: 'oauth',
   LINK_IN_COMMENT: 'true',
   CTA_FOOTER: '',
+  // Fit the pin onto a fixed canvas so the Facebook feed never crops it.
+  IMG_NORMALIZE: 'true',   // set 'false' to post the raw pin image
+  IMG_RATIO: '4:5',        // '4:5' (tallest the FB feed shows uncropped) or '1:1'
+  IMG_BG: 'white',         // padding colour: a name ('white','black') or hex ('ffffff')
 };
 
 const cfg = { ...DEFAULTS };
@@ -49,5 +53,9 @@ cfg._link_in_comment = String(cfg.LINK_IN_COMMENT).trim().toLowerCase() !== 'fal
 // Anything other than an explicit "token" means the OAuth login path.
 cfg._auth_mode = String(cfg.AUTH_MODE).trim().toLowerCase() === 'token'
   ? 'token' : 'oauth';
+// Image normalisation (letterbox the pin so the FB feed does not crop it).
+cfg._img_normalize = String(cfg.IMG_NORMALIZE).trim().toLowerCase() !== 'false';
+cfg._img_ratio = String(cfg.IMG_RATIO || '4:5').trim() === '1:1' ? '1:1' : '4:5';
+cfg._img_bg = String(cfg.IMG_BG || 'white').trim() || 'white';
 
 return [{ json: cfg }];

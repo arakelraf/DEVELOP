@@ -65,11 +65,18 @@ if (plan.toPublish.length && !pageId) {
   return out;
 }
 
+// The image Facebook fetches is letterboxed onto a fixed canvas so the feed
+// never crops it. The original image_url is kept for the binary fallback.
+const canvas = canvasForRatio(cfg._img_ratio);
+
 for (const p of plan.toPublish) {
   const calls = buildGraphCalls(p, { pageId, apiVersion });
   out.push({ json: {
     _kind: 'publish',
     ...p,
+    fb_image_url: buildDisplayImageUrl(p.image_url, {
+      enabled: cfg._img_normalize, w: canvas.w, h: canvas.h, bg: cfg._img_bg,
+    }),
     fb_photo_url: calls.photo.url,
     fb_feed_url: calls.feed.url,
     fb_published: calls.feed.body.published,

@@ -212,6 +212,59 @@ function buildGraphCalls(entry, { pageId, apiVersion = 'v21.0' } = {}) {
   };
 }
 
+/**
+ * Wrap a raw image URL in an on-the-fly transform so the image Facebook
+ * fetches is letterboxed onto a fixed canvas and is never cropped in the feed.
+ *
+ * Why this exists: a single photo in the Facebook feed is shown uncropped only
+ * up to a 4:5 (portrait) aspect ratio. Pinterest pins are taller than that, so
+ * the feed preview clips them top and bottom. Fitting the pin inside a 1080x1350
+ * (4:5) canvas with a solid background means the whole pin is always visible.
+ *
+ * We use images.weserv.nl - a public, sharp-based image proxy. Facebook's own
+ * crawler fetches the resulting URL; n8n never downloads the bytes. The ORIGINAL
+ * url is kept untouched for the binary-upload fallback, so if the proxy is ever
+ * unreachable the post still goes out (with the old, cropped image) instead of
+ * failing.
+ *
+ *   fit=contain  scale to fit inside WxH, pad the rest
+ *   cbg / bg     background colour for the padded area (named or hex, no '#')
+ *   output=jpg   flatten to JPEG (no alpha, Facebook-friendly)
+ *
+ * @param {string} imageUrl  the original (http/https) image URL
+ * @param {{enabled?:boolean,w?:number,h?:number,bg?:string}} [opts]
+ * @returns {string} the transform URL, or the input unchanged when disabled
+ *                   or not an http(s) URL
+ */
+function buildDisplayImageUrl(imageUrl, opts = {}) {
+  const { enabled = true, w = 1080, h = 1350, bg = 'white' } = opts;
+  const u = String(imageUrl || '').trim();
+  if (!enabled || !/^https?:\/\//i.test(u)) return u;
+
+  const src = u.replace(/^https?:\/\//i, '');     // weserv wants the source schemeless
+  const color = String(bg || 'white').replace(/^#/, '');
+  const params = [
+    'url=' + encodeURIComponent(src),
+    'w=' + Math.round(w),
+    'h=' + Math.round(h),
+    'fit=contain',
+    'cbg=' + encodeURIComponent(color),
+    'bg=' + encodeURIComponent(color),
+    'output=jpg',
+    'q=90',
+  ].join('&');
+  return 'https://images.weserv.nl/?' + params;
+}
+
+/** Canvas dimensions for a supported aspect ratio (longest side 1080/1350). */
+function canvasForRatio(ratio) {
+  switch (String(ratio || '4:5').trim()) {
+    case '1:1': return { w: 1080, h: 1080 };
+    case '4:5': return { w: 1080, h: 1350 };
+    default:    return { w: 1080, h: 1350 };
+  }
+}
+
 // ---------------------------------------------------------------- n8n glue
 // Workflow C: decide what to publish, and how.
 // Mode: Run Once for All Items.
@@ -279,11 +332,18 @@ if (plan.toPublish.length && !pageId) {
   return out;
 }
 
+// The image Facebook fetches is letterboxed onto a fixed canvas so the feed
+// never crops it. The original image_url is kept for the binary fallback.
+const canvas = canvasForRatio(cfg._img_ratio);
+
 for (const p of plan.toPublish) {
   const calls = buildGraphCalls(p, { pageId, apiVersion });
   out.push({ json: {
     _kind: 'publish',
     ...p,
+    fb_image_url: buildDisplayImageUrl(p.image_url, {
+      enabled: cfg._img_normalize, w: canvas.w, h: canvas.h, bg: cfg._img_bg,
+    }),
     fb_photo_url: calls.photo.url,
     fb_feed_url: calls.feed.url,
     fb_published: calls.feed.body.published,
